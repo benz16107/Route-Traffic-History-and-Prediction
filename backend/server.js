@@ -5,8 +5,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { initDatabase, getDb } from './db/init.js';
-import { startJob, stopJob, pauseJob, resumeJob } from './services/scheduler.js';
-import { getRoutePolyline } from './services/googleMaps.js';
+import { startJob, stopJob, pauseJob, resumeJob, restoreRunningJobs } from './services/scheduler.js';
+import { getRoutePolyline, getRoutePolylines } from './services/googleMaps.js';
 import { mkdirSync, existsSync } from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -61,7 +61,7 @@ app.post('/api/jobs', (req, res) => {
       navigation_type = 'driving',
       avoid_highways = false,
       avoid_tolls = false,
-      additional_routes = 0,
+      additional_routes = 1,
     } = req.body;
 
     if (!start_location || !end_location) {
@@ -186,20 +186,25 @@ app.post('/api/jobs/:id/resume', async (req, res) => {
   }
 });
 
-// API: Get route polyline for map display (uses backend Directions API - no frontend key needed)
+// API: Get route polyline(s) for map display (uses backend Directions API - no frontend key needed)
 app.get('/api/route-preview', async (req, res) => {
   try {
-    const { origin, destination, mode = 'driving', avoid_highways, avoid_tolls } = req.query;
+    const { origin, destination, mode = 'driving', avoid_highways, avoid_tolls, additional_routes } = req.query;
     if (!origin || !destination) {
       return res.status(400).json({ error: 'origin and destination required' });
     }
-    const route = await getRoutePolyline(origin, destination, {
-      mode,
-      avoidHighways: !!avoid_highways,
-      avoidTolls: !!avoid_tolls,
-    });
-    if (!route) return res.status(404).json({ error: 'Route not found' });
-    res.json(route);
+    const opts = { mode, avoidHighways: !!avoid_highways, avoidTolls: !!avoid_tolls };
+    const additional = parseInt(additional_routes, 10) || 0;
+
+    if (additional > 0) {
+      const routes = await getRoutePolylines(origin, destination, { ...opts, additionalRoutes: additional });
+      if (!routes?.length) return res.status(404).json({ error: 'No routes found' });
+      res.json({ routes });
+    } else {
+      const route = await getRoutePolyline(origin, destination, opts);
+      if (!route) return res.status(404).json({ error: 'Route not found' });
+      res.json(route);
+    }
   } catch (e) {
     handleError(res, e, 'GET /api/route-preview');
   }
@@ -260,4 +265,5 @@ if (existsSync(frontendPath)) {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
+  restoreRunningJobs();
 });

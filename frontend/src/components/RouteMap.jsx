@@ -5,26 +5,28 @@ import 'leaflet/dist/leaflet.css'
 import { fetchJson } from '../utils/api.js'
 
 const API = '/api'
+const ROUTE_COLORS = ['#58a6ff', '#3fb950', '#d29922']
 
-function FitBounds({ points }) {
+function FitBounds({ routes }) {
   const map = useMap()
   useEffect(() => {
-    if (points?.length) {
-      const bounds = L.latLngBounds(points.map(([lat, lng]) => [lat, lng]))
+    const allPoints = routes?.flatMap(r => r.points || []) || []
+    if (allPoints.length) {
+      const bounds = L.latLngBounds(allPoints.map(([lat, lng]) => [lat, lng]))
       map.fitBounds(bounds, { padding: [30, 30] })
     }
-  }, [map, points])
+  }, [map, routes])
   return null
 }
 
-export default function RouteMap({ origin, destination, travelMode = 'driving', avoidHighways, avoidTolls }) {
-  const [route, setRoute] = useState(null)
+export default function RouteMap({ origin, destination, travelMode = 'driving', avoidHighways, avoidTolls, additionalRoutes = 0 }) {
+  const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
   useEffect(() => {
     if (!origin || !destination) {
-      setRoute(null)
+      setData(null)
       setError(null)
       return
     }
@@ -37,15 +39,16 @@ export default function RouteMap({ origin, destination, travelMode = 'driving', 
     })
     if (avoidHighways) params.set('avoid_highways', '1')
     if (avoidTolls) params.set('avoid_tolls', '1')
+    if (additionalRoutes > 0) params.set('additional_routes', String(additionalRoutes))
 
     fetchJson(`${API}/route-preview?${params}`)
-      .then(data => {
-        if (data.error) throw new Error(data.error)
-        setRoute(data)
+      .then(res => {
+        if (res.error) throw new Error(res.error)
+        setData(res)
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false))
-  }, [origin, destination, travelMode, avoidHighways, avoidTolls])
+  }, [origin, destination, travelMode, avoidHighways, avoidTolls, additionalRoutes])
 
   if (!origin || !destination) {
     return (
@@ -72,16 +75,17 @@ export default function RouteMap({ origin, destination, travelMode = 'driving', 
     )
   }
 
-  if (!route?.points?.length) {
+  const routes = data?.routes || (data?.points ? [{ ...data, routeIndex: 0 }] : [])
+  if (!routes.length || !routes[0]?.points?.length) {
     return <div className="map-placeholder">No route found</div>
   }
 
-  const polylinePositions = route.points.map(([lat, lng]) => [lat, lng])
+  const center = routes[0].start || routes[0].points[0]
 
   return (
     <div className="route-map-container">
       <MapContainer
-        center={route.start || polylinePositions[0]}
+        center={center}
         zoom={10}
         style={{ height: '400px', width: '100%', borderRadius: '8px' }}
         scrollWheelZoom={true}
@@ -90,9 +94,28 @@ export default function RouteMap({ origin, destination, travelMode = 'driving', 
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        <Polyline positions={polylinePositions} color="#58a6ff" weight={4} opacity={0.8} />
-        <FitBounds points={route.points} />
+        {routes.map((route, i) => (
+          <Polyline
+            key={i}
+            positions={route.points.map(([lat, lng]) => [lat, lng])}
+            color={ROUTE_COLORS[i % ROUTE_COLORS.length]}
+            weight={4}
+            opacity={0.8}
+          />
+        ))}
+        <FitBounds routes={routes} />
       </MapContainer>
+      {routes.length > 1 && (
+        <div className="route-map-legend">
+          {routes.map((r, i) => (
+            <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', marginRight: '1rem' }}>
+              <span style={{ width: 12, height: 4, background: ROUTE_COLORS[i], borderRadius: 2 }} />
+              Route {i + 1}
+              {r.durationSeconds && ` (${Math.round(r.durationSeconds / 60)} min)`}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

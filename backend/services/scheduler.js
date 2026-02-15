@@ -40,7 +40,11 @@ export async function runCollectionCycle(jobId) {
       avoidTolls: !!job.avoid_tolls,
       alternatives: routesToFetch - 1,
     });
-      const stmt = db.prepare(`
+    if (!routes?.length) {
+      console.warn(`[Scheduler] Job ${jobId}: No routes returned for ${job.start_location} → ${job.end_location}`);
+      return;
+    }
+    const stmt = db.prepare(`
         INSERT INTO route_snapshots (id, job_id, route_index, collected_at, duration_seconds, distance_meters, route_details)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
@@ -59,6 +63,7 @@ export async function runCollectionCycle(jobId) {
 
     db.prepare('UPDATE collection_jobs SET updated_at = ? WHERE id = ?')
       .run(now, jobId);
+    console.log(`[Scheduler] Job ${jobId}: Collected ${routes.length} route(s)`);
   } catch (err) {
     console.error(`[Scheduler] Job ${jobId} error:`, err.message);
   }
@@ -115,4 +120,23 @@ export async function resumeJob(jobId) {
 
 export function getActiveJobs() {
   return Array.from(activeIntervals.keys());
+}
+
+/** Restore cron for jobs that were running before server restart */
+export function restoreRunningJobs() {
+  const db = getDb();
+  const running = db.prepare("SELECT id FROM collection_jobs WHERE status = 'running'").all();
+  for (const { id } of running) {
+    try {
+      const job = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(id);
+      if (!job) continue;
+      const cronExpr = `*/${job.cycle_minutes || 60} * * * *`;
+      const task = cron.schedule(cronExpr, () => runCollectionCycle(id));
+      activeIntervals.set(id, task);
+      runCollectionCycle(id); // Run immediately
+      console.log(`[Scheduler] Restored job ${id}`);
+    } catch (e) {
+      console.error(`[Scheduler] Failed to restore job ${id}:`, e.message);
+    }
+  }
 }

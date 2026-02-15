@@ -29,7 +29,7 @@ export default function JobDetail({ jobId, onBack }) {
         fetchJson(`${API}/jobs/${jobId}/snapshots`),
       ])
       setJob(jobData)
-      setSnapshots(snapData)
+      setSnapshots(Array.isArray(snapData) ? snapData : [])
     } catch (e) {
       console.error(e)
     } finally {
@@ -48,7 +48,6 @@ export default function JobDetail({ jobId, onBack }) {
     setActionLoading(action)
     try {
       const data = await fetchJson(`${API}/jobs/${jobId}/${action}`, { method: 'POST' })
-      if (!res.ok) throw new Error(data.error)
       setJob(data)
       fetchData()
     } catch (e) {
@@ -183,10 +182,50 @@ export default function JobDetail({ jobId, onBack }) {
           travelMode={job.navigation_type}
           avoidHighways={!!job.avoid_highways}
           avoidTolls={!!job.avoid_tolls}
+          additionalRoutes={job.additional_routes ?? 0}
         />
       </div>
 
-      {/* Live status */}
+      {/* Current cycle – live data from latest collection */}
+      <div className="card current-cycle-card">
+        <h3 style={{ margin: '0 0 1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          Current Cycle
+          {job.status === 'running' && (
+            <span className="live-badge">Live</span>
+          )}
+        </h3>
+        {snapshots.length === 0 ? (
+          <div className="empty-state">
+            <p>{job.status === 'running' ? 'Collecting first data... Check backend console for errors.' : 'No data yet. Start the job to begin collecting.'}</p>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+              Collected at {new Date(snapshots[snapshots.length - 1].collected_at).toLocaleString()}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem' }}>
+              {snapshots
+                .filter(s => s.collected_at === snapshots[snapshots.length - 1].collected_at)
+                .sort((a, b) => a.route_index - b.route_index)
+                .map(s => (
+                  <div key={s.id} className="current-cycle-route">
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                      Route {s.route_index + 1}
+                    </div>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 600 }}>
+                      {s.duration_seconds ? `${Math.round(s.duration_seconds / 60)} min` : '—'}
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                      {s.distance_meters ? `${(s.distance_meters / 1000).toFixed(1)} km` : ''}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Collection status */}
       <div className="card">
         <h3 style={{ margin: '0 0 1rem 0' }}>Collection Status</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem' }}>

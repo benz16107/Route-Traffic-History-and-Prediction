@@ -17,7 +17,7 @@ export default function CreateJob({ onCreated, onCancel }) {
     navigation_type: 'driving',
     avoid_highways: false,
     avoid_tolls: false,
-    additional_routes: 0,
+    additional_routes: 1,
   })
 
   const handleChange = (e) => {
