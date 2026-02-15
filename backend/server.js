@@ -18,6 +18,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Log and normalize 500 errors
+function handleError(res, e, context = '') {
+  const msg = e?.message || String(e);
+  console.error(`[API Error]${context ? ` ${context}:` : ''}`, msg);
+  res.status(500).json({ error: msg });
+}
+
 // API: List jobs
 app.get('/api/jobs', (req, res) => {
   try {
@@ -25,7 +32,7 @@ app.get('/api/jobs', (req, res) => {
     const jobs = db.prepare('SELECT * FROM collection_jobs ORDER BY created_at DESC').all();
     res.json(jobs);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    handleError(res, e, 'GET /api/jobs');
   }
 });
 
@@ -37,7 +44,7 @@ app.get('/api/jobs/:id', (req, res) => {
     if (!job) return res.status(404).json({ error: 'Job not found' });
     res.json(job);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    handleError(res, e, 'GET /api/jobs/:id');
   }
 });
 
@@ -83,7 +90,7 @@ app.post('/api/jobs', (req, res) => {
     const job = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(id);
     res.status(201).json(job);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    handleError(res, e, 'POST /api/jobs');
   }
 });
 
@@ -113,7 +120,7 @@ app.patch('/api/jobs/:id', (req, res) => {
     const updated = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(req.params.id);
     res.json(updated);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    handleError(res, e, 'PATCH /api/jobs/:id');
   }
 });
 
@@ -127,7 +134,7 @@ app.delete('/api/jobs/:id', (req, res) => {
     if (r.changes === 0) return res.status(404).json({ error: 'Job not found' });
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    handleError(res, e, 'DELETE /api/jobs/:id');
   }
 });
 
@@ -139,7 +146,7 @@ app.post('/api/jobs/:id/start', async (req, res) => {
     const job = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(req.params.id);
     res.json(job);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    handleError(res, e, 'POST /api/jobs/:id/start');
   }
 });
 
@@ -151,7 +158,7 @@ app.post('/api/jobs/:id/stop', (req, res) => {
     const job = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(req.params.id);
     res.json(job);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    handleError(res, e, 'POST /api/jobs/:id/stop');
   }
 });
 
@@ -163,7 +170,7 @@ app.post('/api/jobs/:id/pause', (req, res) => {
     const job = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(req.params.id);
     res.json(job);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    handleError(res, e, 'POST /api/jobs/:id/pause');
   }
 });
 
@@ -175,7 +182,7 @@ app.post('/api/jobs/:id/resume', async (req, res) => {
     const job = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(req.params.id);
     res.json(job);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    handleError(res, e, 'POST /api/jobs/:id/resume');
   }
 });
 
@@ -194,7 +201,7 @@ app.get('/api/route-preview', async (req, res) => {
     if (!route) return res.status(404).json({ error: 'Route not found' });
     res.json(route);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    handleError(res, e, 'GET /api/route-preview');
   }
 });
 
@@ -207,7 +214,7 @@ app.get('/api/jobs/:id/snapshots', (req, res) => {
     ).all(req.params.id);
     res.json(snapshots);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    handleError(res, e, 'GET /api/jobs/:id/snapshots');
   }
 });
 
@@ -235,7 +242,7 @@ app.get('/api/jobs/:id/export', (req, res) => {
 
     res.json({ job, snapshots });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    handleError(res, e, 'GET /api/jobs/:id/export');
   }
 });
 

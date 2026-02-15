@@ -43,9 +43,18 @@ export async function getRoutePolyline(origin, destination, options = {}) {
   if (avoidTolls) avoid.push('tolls');
   if (avoid.length) params.set('avoid', avoid.join('|'));
 
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey || apiKey === 'your_api_key_here') {
+    throw new Error('GOOGLE_MAPS_API_KEY not set in .env');
+  }
+
   const res = await fetch(`${DIRECTIONS_API}?${params}`);
   const data = await res.json();
-  if (data.status !== 'OK' || !data.routes?.[0]) return null;
+
+  if (data.status !== 'OK') {
+    throw new Error(data.error_message || data.status || 'Directions API error');
+  }
+  if (!data.routes?.[0]) return null;
 
   const route = data.routes[0];
   const encoded = route.overview_polyline?.points;
