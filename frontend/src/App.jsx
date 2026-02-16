@@ -35,7 +35,11 @@ function App() {
           <CreateJob onCreated={(id) => openJob(id)} onCancel={() => setView('list')} />
         )}
         {view === 'detail' && selectedJobId && (
-          <JobDetail jobId={selectedJobId} onBack={() => setView('list')} />
+          <JobDetail
+            jobId={selectedJobId}
+            onBack={() => setView('list')}
+            onFlipRoute={(id) => setSelectedJobId(id)}
+          />
         )}
       </main>
     </div>

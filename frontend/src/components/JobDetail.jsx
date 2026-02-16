@@ -16,7 +16,7 @@ import { shortenToStreet } from '../utils/formatAddress.js'
 
 const API = '/api'
 
-export default function JobDetail({ jobId, onBack }) {
+export default function JobDetail({ jobId, onBack, onFlipRoute }) {
   const [job, setJob] = useState(null)
   const [snapshots, setSnapshots] = useState([])
   const [loading, setLoading] = useState(true)
@@ -81,6 +81,33 @@ export default function JobDetail({ jobId, onBack }) {
 
   const handleExport = (format) => {
     window.open(`${API}/jobs/${jobId}/export?format=${format}`, '_blank')
+  }
+
+  const handleCreateFlippedJob = async () => {
+    if (!job) return
+    setActionLoading('flip')
+    try {
+      const payload = {
+        start_location: job.end_location,
+        end_location: job.start_location,
+        cycle_minutes: job.cycle_minutes ?? 60,
+        cycle_seconds: job.cycle_seconds ?? 0,
+        duration_days: job.duration_days ?? 7,
+        navigation_type: job.navigation_type || 'driving',
+        avoid_highways: !!job.avoid_highways,
+        avoid_tolls: !!job.avoid_tolls,
+      }
+      const created = await fetchJson(`${API}/jobs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (created?.id && onFlipRoute) onFlipRoute(created.id)
+    } catch (e) {
+      alert(e?.message || 'Failed to create job')
+    } finally {
+      setActionLoading('')
+    }
   }
 
   if (loading || !job) return <div className="card card-loading"><span className="loading-text">Loading job...</span></div>
@@ -171,6 +198,14 @@ export default function JobDetail({ jobId, onBack }) {
                 Edit
               </button>
             )}
+            <button
+              className="btn btn-secondary"
+              onClick={handleCreateFlippedJob}
+              disabled={actionLoading}
+              title="Create a new job with start and destination swapped"
+            >
+              {actionLoading === 'flip' ? 'Creating...' : 'New job (reverse route)'}
+            </button>
             <button className="btn btn-secondary" onClick={() => handleExport('json')}>
               Export JSON
             </button>
