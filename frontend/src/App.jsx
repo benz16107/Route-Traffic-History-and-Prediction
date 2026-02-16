@@ -39,6 +39,7 @@ function App() {
             jobId={selectedJobId}
             onBack={() => setView('list')}
             onFlipRoute={(id) => setSelectedJobId(id)}
+            onDeleted={() => { setSelectedJobId(null); setView('list'); }}
           />
         )}
       </main>

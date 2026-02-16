@@ -16,7 +16,7 @@ import { shortenToStreet } from '../utils/formatAddress.js'
 
 const API = '/api'
 
-export default function JobDetail({ jobId, onBack, onFlipRoute }) {
+export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
   const [job, setJob] = useState(null)
   const [snapshots, setSnapshots] = useState([])
   const [loading, setLoading] = useState(true)
@@ -81,6 +81,19 @@ export default function JobDetail({ jobId, onBack, onFlipRoute }) {
 
   const handleExport = (format) => {
     window.open(`${API}/jobs/${jobId}/export?format=${format}`, '_blank')
+  }
+
+  const handleDelete = async () => {
+    if (!window.confirm('Delete this job and all its collected data? This cannot be undone.')) return
+    setActionLoading('delete')
+    try {
+      await fetchJson(`${API}/jobs/${jobId}`, { method: 'DELETE' })
+      onDeleted?.()
+    } catch (e) {
+      alert(e?.message || 'Failed to delete job')
+    } finally {
+      setActionLoading('')
+    }
   }
 
   const handleCreateFlippedJob = async () => {
@@ -217,6 +230,14 @@ export default function JobDetail({ jobId, onBack, onFlipRoute }) {
             </button>
             <button className="btn btn-secondary" onClick={() => handleExport('csv')}>
               Export CSV
+            </button>
+            <button
+              className="btn btn-danger"
+              onClick={handleDelete}
+              disabled={actionLoading}
+              title="Delete this job and all collected data"
+            >
+              {actionLoading === 'delete' ? 'Deleting...' : 'Delete'}
             </button>
           </div>
         </div>
@@ -377,11 +398,13 @@ export default function JobDetail({ jobId, onBack, onFlipRoute }) {
                 </tr>
               </thead>
               <tbody>
-                {snapshots
-                  .filter(s => (s.route_index ?? 0) === 0)
+                {primarySnapshots
                   .slice(-50)
                   .reverse()
-                  .map(s => (
+                  .map(s => {
+                    const isMin = s.id === minSnapshotId
+                    const isMax = s.id === maxSnapshotId
+                    return (
                     <React.Fragment key={s.id}>
                       <tr
                         onClick={() => setExpandedSnapshotId(prev => prev === s.id ? null : s.id)}
@@ -396,7 +419,11 @@ export default function JobDetail({ jobId, onBack, onFlipRoute }) {
                         </td>
                         <td style={{ padding: '0.5rem' }}>{new Date(s.collected_at).toLocaleString()}</td>
                         <td style={{ padding: '0.5rem', textAlign: 'right' }}>
-                          {s.duration_seconds ? Math.round(s.duration_seconds / 60) : '—'}
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                            {s.duration_seconds ? Math.round(s.duration_seconds / 60) : '—'}
+                            {isMin && <span className="duration-badge duration-lowest">Lowest</span>}
+                            {isMax && <span className="duration-badge duration-highest">Highest</span>}
+                          </span>
                         </td>
                         <td style={{ padding: '0.5rem', textAlign: 'right' }}>
                           {s.distance_meters ? (s.distance_meters / 1000).toFixed(2) : '—'}
@@ -410,12 +437,13 @@ export default function JobDetail({ jobId, onBack, onFlipRoute }) {
                         </tr>
                       )}
                     </React.Fragment>
-                  ))}
+                    )
+                  })}
               </tbody>
             </table>
-            {snapshots.filter(s => (s.route_index ?? 0) === 0).length > 50 && (
+            {primarySnapshots.length > 50 && (
               <p style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                Showing last 50 of {snapshots.filter(s => (s.route_index ?? 0) === 0).length} snapshots
+                Showing last 50 of {primarySnapshots.length} snapshots
               </p>
             )}
           </div>

@@ -522,6 +522,26 @@ body::before {
   font-weight: 600;
 }
 
+/* Duration min/max badges in table */
+.duration-badge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.duration-lowest {
+  background: var(--success-muted);
+  color: var(--success);
+}
+
+.duration-highest {
+  background: var(--warning-muted);
+  color: var(--warning);
+}
+
 /* Loading state */
 .card-loading {
   display: flex;
