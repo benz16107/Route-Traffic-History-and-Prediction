@@ -1,12 +1,25 @@
 import { useState, useEffect, useRef } from 'react'
 
-const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search'
+const API = '/api'
 
-export default function PlaceAutocomplete({ value, onChange, placeholder, id, required }) {
+/** Derive country code from browser locale (e.g. en-US → us, en-GB → gb) or env override */
+function getDefaultCountry() {
+  const env = import.meta.env?.VITE_PLACES_COUNTRY || ''
+  if (env && env.length === 2) return env.toLowerCase()
+  const lang = typeof navigator !== 'undefined' ? navigator.language : ''
+  const parts = lang.split('-')
+  const region = parts[parts.length - 1]
+  if (region && region.length === 2) return region.toLowerCase()
+  return ''
+}
+
+export default function PlaceAutocomplete({ value, onChange, placeholder, id, required, countryCode }) {
   const [suggestions, setSuggestions] = useState([])
   const [showDropdown, setShowDropdown] = useState(false)
   const [loading, setLoading] = useState(false)
   const wrapperRef = useRef(null)
+
+  const country = countryCode ?? getDefaultCountry()
 
   useEffect(() => {
     function handleClickOutside(e) {
@@ -19,38 +32,30 @@ export default function PlaceAutocomplete({ value, onChange, placeholder, id, re
   }, [])
 
   useEffect(() => {
-    if (!value || value.length < 3) {
+    if (!value || value.length < 2) {
       setSuggestions([])
       return
     }
     const t = setTimeout(async () => {
       setLoading(true)
       try {
-        const params = new URLSearchParams({
-          q: value,
-          format: 'json',
-          addressdetails: '1',
-          limit: '5',
-        })
-        const res = await fetch(`${NOMINATIM_URL}?${params}`, {
-          headers: {
-            Accept: 'application/json',
-            'User-Agent': 'RouteTrafficHistoryApp/1.0 (address autocomplete)',
-          },
-        })
+        const params = new URLSearchParams({ input: value.trim() })
+        if (country) params.set('country', country)
+        const res = await fetch(`${API}/place-autocomplete?${params}`)
         const data = await res.json()
-        setSuggestions(Array.isArray(data) ? data : [])
+        if (!res.ok) throw new Error(data?.error || 'Autocomplete failed')
+        setSuggestions(data.predictions || [])
       } catch {
         setSuggestions([])
       } finally {
         setLoading(false)
       }
-    }, 300)
+    }, 250)
     return () => clearTimeout(t)
-  }, [value])
+  }, [value, country])
 
   const selectSuggestion = (item) => {
-    const addr = item.display_name || item.name || ''
+    const addr = item.description || ''
     if (addr) onChange(addr)
     setSuggestions([])
     setShowDropdown(false)
@@ -99,7 +104,7 @@ export default function PlaceAutocomplete({ value, onChange, placeholder, id, re
         >
           {suggestions.map((item, i) => (
             <li
-              key={i}
+              key={item.place_id || i}
               onClick={() => selectSuggestion(item)}
               style={{
                 padding: '0.5rem 0.75rem',
@@ -108,13 +113,13 @@ export default function PlaceAutocomplete({ value, onChange, placeholder, id, re
                 borderBottom: i < suggestions.length - 1 ? '1px solid var(--border)' : 'none',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--bg-hover, rgba(0,0,0,0.05))'
+                e.currentTarget.style.background = 'var(--surface-hover)'
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = 'transparent'
               }}
             >
-              {item.display_name}
+              {item.description}
             </li>
           ))}
         </ul>

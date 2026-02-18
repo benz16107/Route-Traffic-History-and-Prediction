@@ -187,6 +187,43 @@ app.post('/api/jobs/:id/resume', async (req, res) => {
   }
 });
 
+// API: Place autocomplete (proxies to Google Places API for better address matching)
+app.get('/api/place-autocomplete', async (req, res) => {
+  try {
+    const input = (req.query.input || '').trim();
+    const country = (req.query.country || '').toLowerCase().replace(/[^a-z]/g, '');
+    if (input.length < 2) {
+      return res.json({ predictions: [] });
+    }
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    if (!apiKey || apiKey === 'your_api_key_here') {
+      return res.status(500).json({ error: 'GOOGLE_MAPS_API_KEY not configured' });
+    }
+    const params = new URLSearchParams({
+      input,
+      key: apiKey,
+      types: 'geocode',
+      language: 'en',
+    });
+    if (country.length === 2) {
+      params.set('components', `country:${country}`);
+    }
+    const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?${params}`;
+    const fetchRes = await fetch(url);
+    const data = await fetchRes.json();
+    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
+      throw new Error(data.error_message || data.status || 'Place autocomplete failed');
+    }
+    const predictions = (data.predictions || []).map((p) => ({
+      description: p.description,
+      place_id: p.place_id,
+    }));
+    res.json({ predictions });
+  } catch (e) {
+    handleError(res, e, 'GET /api/place-autocomplete');
+  }
+});
+
 // API: Reverse geocode lat,lng to address (for "current location" button)
 app.get('/api/reverse-geocode', async (req, res) => {
   try {
