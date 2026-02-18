@@ -1,50 +1,54 @@
 import { useState } from 'react'
-import CreateJob from './components/CreateJob'
+import Sidebar from './components/Sidebar'
+import Dashboard from './components/Dashboard'
 import JobsList from './components/JobsList'
+import RouteWizard from './components/RouteWizard'
 import JobDetail from './components/JobDetail'
 import './App.css'
 
-function App() {
-  const [view, setView] = useState('list')
+export default function App() {
+  const [view, setView] = useState('dashboard')
   const [selectedJobId, setSelectedJobId] = useState(null)
 
-  const openJob = (id) => {
+  const goTo = (v) => {
+    setView(v)
+    if (v !== 'detail') setSelectedJobId(null)
+  }
+
+  const openRoute = (id) => {
     setSelectedJobId(id)
     setView('detail')
   }
 
   return (
     <div className="app">
-      <header className="header">
-        <h1>Route Traffic History & Prediction</h1>
-        <nav>
-          <button onClick={() => setView('list')} className={view === 'list' ? 'active' : ''}>
-            Jobs
-          </button>
-          <button onClick={() => { setView('create'); setSelectedJobId(null); }} className={view === 'create' ? 'active' : ''}>
-            New Job
-          </button>
-        </nav>
-      </header>
-
+      <Sidebar view={view} onNavigate={goTo} />
       <main className="main">
-        {view === 'list' && (
-          <JobsList onSelectJob={openJob} />
+        {view === 'dashboard' && (
+          <Dashboard
+            onSelectRoute={openRoute}
+            onNewRoute={() => goTo('new')}
+            onViewAllRoutes={() => goTo('routes')}
+          />
         )}
-        {view === 'create' && (
-          <CreateJob onCreated={(id) => openJob(id)} onCancel={() => setView('list')} />
+        {view === 'routes' && (
+          <JobsList onSelectJob={openRoute} />
+        )}
+        {view === 'new' && (
+          <RouteWizard
+            onCreated={(id) => openRoute(id)}
+            onCancel={() => goTo('dashboard')}
+          />
         )}
         {view === 'detail' && selectedJobId && (
           <JobDetail
             jobId={selectedJobId}
-            onBack={() => setView('list')}
-            onFlipRoute={(id) => setSelectedJobId(id)}
-            onDeleted={() => { setSelectedJobId(null); setView('list'); }}
+            onBack={() => goTo('routes')}
+            onFlipRoute={(id) => { setSelectedJobId(id) }}
+            onDeleted={() => goTo('routes')}
           />
         )}
       </main>
     </div>
   )
 }
-
-export default App

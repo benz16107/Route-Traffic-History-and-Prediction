@@ -45,48 +45,51 @@ export default function JobsList({ onSelectJob }) {
 
   if (jobs.length === 0) {
     return (
-      <div className="card">
-        <div className="empty-state">
-          <h3>No collection jobs yet</h3>
-          <p>Create a new job to start collecting route traffic data.</p>
+      <div className="routes-page">
+        <h2>Routes</h2>
+        <div className="card" style={{ maxWidth: 420, margin: '2rem auto' }}>
+          <div className="empty-state">
+            <div className="empty-state-icon">📍</div>
+            <h3>No routes yet</h3>
+            <p>Create a route to start collecting traffic data over time.</p>
+          </div>
         </div>
       </div>
     )
   }
 
   return (
-    <div>
-      <h2 style={{ marginBottom: '1rem' }}>Collection Jobs</h2>
-      {jobs.map(job => (
-        <div
-          key={job.id}
-          className="card job-card"
-          onClick={() => onSelectJob(job.id)}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
-            <div>
-              <h3 style={{ margin: '0 0 0.25rem 0', fontSize: '1rem' }}>
-                {shortenToStreet(job.start_location)} → {shortenToStreet(job.end_location)}
-              </h3>
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                {(job.cycle_seconds ?? 0) > 0 ? `${job.cycle_seconds} sec` : `${job.cycle_minutes ?? 60} min`} cycle • {job.duration_days} days • {job.navigation_type}
-              </div>
+    <div className="routes-page">
+      <h2>Routes</h2>
+      <div className="routes-grid">
+        {jobs.map(job => (
+          <div
+            key={job.id}
+            className="card job-card route-tile"
+            onClick={() => onSelectJob(job.id)}
+          >
+            <div className="route-tile-route">
+              {shortenToStreet(job.start_location)}
+              <span className="route-tile-arrow">→</span>
+              {shortenToStreet(job.end_location)}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span className={`status-badge status-${job.status}`}>{job.status}</span>
+            <div className="route-tile-meta" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span className={`route-tile-status status-badge status-${job.status}`}>{job.status}</span>
+              <span className="route-tile-detail" style={{ flex: 1, minWidth: 0 }}>
+                {(job.cycle_seconds ?? 0) > 0 ? `${job.cycle_seconds}s` : `${job.cycle_minutes ?? 60}m`} · {job.navigation_type}
+              </span>
               <button
-                className="btn btn-danger"
+                className="btn btn-danger btn-delete-small"
                 onClick={(e) => handleDelete(e, job.id)}
                 disabled={deletingId === job.id}
                 title="Delete this job"
-                style={{ padding: '0.25rem 0.5rem', fontSize: '0.8rem' }}
               >
-                {deletingId === job.id ? 'Deleting...' : 'Delete'}
+                {deletingId === job.id ? '…' : 'Delete'}
               </button>
             </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   )
 }

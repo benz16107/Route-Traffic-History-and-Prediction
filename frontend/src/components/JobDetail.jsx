@@ -142,26 +142,34 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
 
   return (
     <div>
-      <button className="btn btn-secondary" onClick={onBack} style={{ marginBottom: '1rem' }}>
-        ← Back to Jobs
-      </button>
+      <div className="page-header">
+        <button className="btn btn-secondary btn-back" onClick={onBack}>
+          ← Back
+        </button>
+      </div>
 
       <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1.25rem' }}>
           <div>
-            <h2 style={{ margin: '0 0 0.5rem 0' }}>
-              {shortenToStreet(job.start_location)} → {shortenToStreet(job.end_location)}
-            </h2>
-            <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-              Cycle: {(job.cycle_seconds ?? 0) > 0 ? `${job.cycle_seconds} sec` : `${job.cycle_minutes ?? 60} min`} • Duration: {job.duration_days} days • {job.navigation_type}
-              {job.avoid_highways && ' • Avoid highways'}
-              {job.avoid_tolls && ' • Avoid tolls'}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              <h2 style={{ margin: 0, fontSize: '1.25rem' }}>
+                {shortenToStreet(job.start_location)}
+                <span style={{ color: 'var(--accent)', margin: '0 0.35rem', fontWeight: 400 }}>→</span>
+                {shortenToStreet(job.end_location)}
+              </h2>
+              <span className={`status-badge status-${job.status}`}>{job.status}</span>
             </div>
-            <span className={`status-badge status-${job.status}`} style={{ marginTop: '0.5rem', display: 'inline-block' }}>
-              {job.status}
-            </span>
+            <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+              {(job.cycle_seconds ?? 0) > 0 ? `${job.cycle_seconds} sec` : `${job.cycle_minutes ?? 60} min`} cycle
+              <span style={{ margin: '0 0.5rem', opacity: 0.5 }}>·</span>
+              {job.duration_days} days
+              <span style={{ margin: '0 0.5rem', opacity: 0.5 }}>·</span>
+              {job.navigation_type}
+              {job.avoid_highways && ' · Avoid highways'}
+              {job.avoid_tolls && ' · Avoid tolls'}
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <div className="action-bar">
             {(job.status === 'pending' || job.status === 'completed') && (
               <button
                 className="btn btn-success"
@@ -312,40 +320,36 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
 
       {/* Collection status */}
       <div className="card">
-        <h3 style={{ margin: '0 0 1rem 0' }}>Collection Status</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem' }}>
-          <div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Total snapshots</div>
-            <div style={{ fontSize: '1.5rem', fontWeight: 600 }}>
-              {primarySnapshots.length}
-            </div>
+        <h3>Collection Status</h3>
+        <div className="stat-grid">
+          <div className="stat-item">
+            <div className="stat-label">Total snapshots</div>
+            <div className="stat-value">{primarySnapshots.length}</div>
           </div>
-          <div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Lowest time</div>
-            <div style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--success)' }}>
+          <div className="stat-item">
+            <div className="stat-label">Lowest time</div>
+            <div className="stat-value" style={{ color: 'var(--success)' }}>
               {minDuration != null ? `${Math.round(minDuration / 60)} min` : '—'}
             </div>
           </div>
-          <div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Highest time</div>
-            <div style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--warning)' }}>
+          <div className="stat-item">
+            <div className="stat-label">Highest time</div>
+            <div className="stat-value" style={{ color: 'var(--warning)' }}>
               {maxDuration != null ? `${Math.round(maxDuration / 60)} min` : '—'}
             </div>
           </div>
-          <div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Last collected</div>
-            <div style={{ fontSize: '1rem' }}>
+          <div className="stat-item">
+            <div className="stat-label">Last collected</div>
+            <div className="stat-value" style={{ fontSize: '1rem' }}>
               {snapshots.length
                 ? new Date(snapshots[snapshots.length - 1].collected_at).toLocaleString()
                 : '—'}
             </div>
           </div>
           {job.status === 'running' && countdown != null && (
-            <div>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Next cycle in</div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--accent)' }}>
-                {countdown}s
-              </div>
+            <div className="stat-item">
+              <div className="stat-label">Next cycle in</div>
+              <div className="stat-value" style={{ color: 'var(--accent)' }}>{countdown}s</div>
             </div>
           )}
         </div>

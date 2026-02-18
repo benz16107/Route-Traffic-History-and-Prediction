@@ -107,7 +107,7 @@ export default function CreateJob({ onCreated, onCancel }) {
 
   return (
     <div className="card">
-      <h2>Create New Collection Job</h2>
+      <h2 style={{ marginBottom: '1.25rem' }}>Create New Job</h2>
       <form onSubmit={handleSubmit}>
         <div className="form-group">
           <label>Start Location</label>
