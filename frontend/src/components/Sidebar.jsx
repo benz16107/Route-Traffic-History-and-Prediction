@@ -1,4 +1,8 @@
+import { useTheme } from '../context/ThemeContext'
+
 export default function Sidebar({ view, onNavigate }) {
+  const { theme, setTheme } = useTheme()
+
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -28,6 +32,26 @@ export default function Sidebar({ view, onNavigate }) {
           <span>New route</span>
         </button>
       </nav>
+      <div className="sidebar-footer">
+        <div className="theme-toggle" role="group" aria-label="Theme">
+          <button
+            type="button"
+            className={`theme-btn ${theme === 'light' ? 'active' : ''}`}
+            onClick={() => setTheme('light')}
+            title="Light mode"
+          >
+            ☀
+          </button>
+          <button
+            type="button"
+            className={`theme-btn ${theme === 'dark' ? 'active' : ''}`}
+            onClick={() => setTheme('dark')}
+            title="Dark mode"
+          >
+            ☾
+          </button>
+        </div>
+      </div>
     </aside>
   )
 }
