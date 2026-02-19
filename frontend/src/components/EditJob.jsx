@@ -1,7 +1,5 @@
 import { useState, useEffect } from 'react'
-import PlaceAutocomplete from './PlaceAutocomplete'
 import { fetchJson } from '../utils/api.js'
-import { getCurrentLocationAddress } from '../utils/geolocation.js'
 
 const API = '/api'
 
@@ -12,24 +10,23 @@ function toDatetimeLocal(str) {
   return d.toISOString().slice(0, 16)
 }
 
-export default function EditJob({ job, onSaved, onCancel }) {
+// Read saved custom names from job (same keys as API / formatJob)
+function getJobName(job, key) {
+  if (!job || typeof job !== 'object') return ''
+  const v = job[key] ?? job[key.replace(/_([a-z])/g, (_, c) => c.toUpperCase())]
+  return v != null ? String(v).trim() : ''
+}
+
+export default function EditJob({ job, onSaved, onCancel, isRunning = false }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [locationLoading, setLocationLoading] = useState(false)
   const [form, setForm] = useState({
-    start_location: '',
-    end_location: '',
     start_name: '',
     end_name: '',
     name: '',
-    start_time: '',
     end_time: '',
     cycle_value: 60,
     cycle_unit: 'minutes',
-    duration_days: 7,
-    navigation_type: 'driving',
-    avoid_highways: false,
-    avoid_tolls: false,
   })
 
   useEffect(() => {
@@ -37,35 +34,15 @@ export default function EditJob({ job, onSaved, onCancel }) {
       const useSeconds = (job.cycle_seconds ?? 0) > 0
       const cycleVal = useSeconds ? (job.cycle_seconds || 60) : (job.cycle_minutes ?? 60)
       setForm({
-        start_location: job.start_location || '',
-        end_location: job.end_location || '',
-        start_name: job.start_name || '',
-        end_name: job.end_name || '',
-        name: job.name || '',
-        start_time: toDatetimeLocal(job.start_time),
+        start_name: getJobName(job, 'start_name'),
+        end_name: getJobName(job, 'end_name'),
+        name: getJobName(job, 'name') || getJobName(job, 'routeName'),
         end_time: toDatetimeLocal(job.end_time),
         cycle_value: cycleVal,
         cycle_unit: useSeconds ? 'seconds' : 'minutes',
-        duration_days: job.duration_days ?? 7,
-        navigation_type: job.navigation_type || 'driving',
-        avoid_highways: !!job.avoid_highways,
-        avoid_tolls: !!job.avoid_tolls,
       })
     }
-  }, [job?.id])
-
-  const handleUseCurrentLocation = async () => {
-    setLocationLoading(true)
-    setError('')
-    try {
-      const address = await getCurrentLocationAddress()
-      setForm(prev => ({ ...prev, start_location: address }))
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLocationLoading(false)
-    }
-  }
+  }, [job?.id, job?.name, job?.start_name, job?.end_name])
 
   const cycleMin = form.cycle_unit === 'minutes' ? 1 : 10
   const cycleMax = form.cycle_unit === 'minutes' ? 1440 : 86400
@@ -118,23 +95,23 @@ export default function EditJob({ job, onSaved, onCancel }) {
     setError('')
     setLoading(true)
     try {
+      const trimOrNull = (v) => (v != null ? (String(v).trim() || null) : null)
+      const nameFields = {
+        name: trimOrNull(form.name),
+        start_name: trimOrNull(form.start_name),
+        end_name: trimOrNull(form.end_name),
+      }
+      const payload = isRunning
+        ? nameFields
+        : {
+            ...nameFields,
+            end_time: form.end_time || null,
+            ...getCyclePayload(),
+          }
       const data = await fetchJson(`${API}/jobs/${job.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          start_location: form.start_location,
-          end_location: form.end_location,
-          name: form.name?.trim() || null,
-          start_name: form.start_name?.trim() || null,
-          end_name: form.end_name?.trim() || null,
-          start_time: form.start_time || null,
-          end_time: form.end_time || null,
-          ...getCyclePayload(),
-          duration_days: form.duration_days,
-          avoid_highways: form.avoid_highways,
-          avoid_tolls: form.avoid_tolls,
-          // navigation_type is not editable - set at creation only to keep data comparable
-        }),
+        body: JSON.stringify(payload),
       })
       if (data?.error) throw new Error(data.error)
       onSaved(data)
@@ -150,59 +127,36 @@ export default function EditJob({ job, onSaved, onCancel }) {
   return (
     <div className="modal-overlay" onClick={onCancel}>
       <div className="modal-content card" onClick={e => e.stopPropagation()}>
-        <h2>Edit Job Settings</h2>
+        <h2>Edit route</h2>
+        {isRunning && (
+          <p style={{ margin: '0 0 1rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+            While collecting, only start name, end name, and route title can be changed.
+          </p>
+        )}
         <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label>Start Location</label>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
-              <div style={{ flex: 1 }}>
-                <PlaceAutocomplete
-                  value={form.start_location}
-                  onChange={(v) => setForm(prev => ({ ...prev, start_location: v }))}
-                  placeholder="e.g. San Francisco, CA"
-                  id="edit_start_location"
-                  required
-                />
-              </div>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={handleUseCurrentLocation}
-                disabled={locationLoading}
-                style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
-                title="Use your current location"
-              >
-                {locationLoading ? '...' : 'Current location'}
-              </button>
+          <div className="form-row">
+            <div className="form-group">
+              <label>Start name (optional)</label>
+              <input
+                type="text"
+                name="start_name"
+                value={form.start_name}
+                onChange={handleChange}
+                placeholder="e.g. Home"
+                maxLength={80}
+              />
             </div>
-            <input
-              type="text"
-              name="start_name"
-              value={form.start_name}
-              onChange={handleChange}
-              placeholder="Custom name (e.g. Home)"
-              maxLength={80}
-              style={{ marginTop: '0.35rem' }}
-            />
-          </div>
-          <div className="form-group">
-            <label>Destination Location</label>
-            <PlaceAutocomplete
-              value={form.end_location}
-              onChange={(v) => setForm(prev => ({ ...prev, end_location: v }))}
-              placeholder="e.g. Oakland, CA"
-              id="edit_end_location"
-              required
-            />
-            <input
-              type="text"
-              name="end_name"
-              value={form.end_name}
-              onChange={handleChange}
-              placeholder="Custom name (e.g. Office)"
-              maxLength={80}
-              style={{ marginTop: '0.35rem' }}
-            />
+            <div className="form-group">
+              <label>End name (optional)</label>
+              <input
+                type="text"
+                name="end_name"
+                value={form.end_name}
+                onChange={handleChange}
+                placeholder="e.g. Office"
+                maxLength={80}
+              />
+            </div>
           </div>
 
           <div className="form-group">
@@ -215,108 +169,60 @@ export default function EditJob({ job, onSaved, onCancel }) {
               placeholder="Overrides start → end as the main title"
               maxLength={120}
             />
-            <p style={{ margin: '0.35rem 0 0', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-              If set, this is the main title; start/end names show as subtitle.
-            </p>
           </div>
 
-          <div className="form-row">
-            <div className="form-group">
-              <label>Data Start Time (optional)</label>
-              <input
-                name="start_time"
-                type="datetime-local"
-                value={form.start_time}
-                onChange={handleChange}
-              />
-            </div>
-            <div className="form-group">
-              <label>Data End Time (optional)</label>
-              <input
-                name="end_time"
-                type="datetime-local"
-                value={form.end_time}
-                onChange={handleChange}
-              />
-            </div>
-          </div>
-
-          <div className="form-row">
-            <div className="form-group">
-              <label>Cycle Duration</label>
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                <input
-                  type="number"
-                  min={cycleMin}
-                  max={cycleMax}
-                  value={form.cycle_value === '' ? '' : form.cycle_value}
-                  onChange={handleCycleValueChange}
-                  onBlur={() => {
-                    const v = Number(form.cycle_value)
-                    if (form.cycle_value === '' || Number.isNaN(v) || v < cycleMin || v > cycleMax) {
-                      setForm(prev => ({ ...prev, cycle_value: cycleMin }))
-                    }
-                  }}
-                  style={{ width: '6rem' }}
-                  aria-label="Cycle duration"
-                />
-                <select
-                  value={form.cycle_unit}
-                  onChange={handleCycleUnitChange}
-                  aria-label="Cycle unit"
-                >
-                  <option value="minutes">minutes</option>
-                  <option value="seconds">seconds</option>
-                </select>
+          {!isRunning && (
+            <>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Cycle time</label>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input
+                      type="number"
+                      min={cycleMin}
+                      max={cycleMax}
+                      value={form.cycle_value === '' ? '' : form.cycle_value}
+                      onChange={handleCycleValueChange}
+                      onBlur={() => {
+                        const v = Number(form.cycle_value)
+                        if (form.cycle_value === '' || Number.isNaN(v) || v < cycleMin || v > cycleMax) {
+                          setForm(prev => ({ ...prev, cycle_value: cycleMin }))
+                        }
+                      }}
+                      style={{ width: '6rem' }}
+                      aria-label="Cycle duration"
+                    />
+                    <select
+                      value={form.cycle_unit}
+                      onChange={handleCycleUnitChange}
+                      aria-label="Cycle unit"
+                    >
+                      <option value="minutes">minutes</option>
+                      <option value="seconds">seconds</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label>End date (optional)</label>
+                  <input
+                    name="end_time"
+                    type="datetime-local"
+                    value={form.end_time}
+                    onChange={handleChange}
+                  />
+                  <p style={{ margin: '0.35rem 0 0', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                    When to stop collecting data. Leave empty for no end date.
+                  </p>
+                </div>
               </div>
-            </div>
-            <div className="form-group">
-              <label>Duration (days)</label>
-              <input
-                name="duration_days"
-                type="number"
-                min={1}
-                max={365}
-                value={form.duration_days}
-                onChange={handleChange}
-              />
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label>Navigation Type</label>
-            <div
-              style={{
-                padding: '0.5rem 0.75rem',
-                background: 'var(--bg)',
-                borderRadius: 6,
-                fontSize: '0.9rem',
-                color: 'var(--text-muted)',
-              }}
-            >
-              {form.navigation_type || 'driving'} (set at creation, cannot be changed)
-            </div>
-          </div>
-
-          <div className="form-group">
-            <label>Route Preferences</label>
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                <input type="checkbox" name="avoid_highways" checked={form.avoid_highways} onChange={handleChange} />
-                Avoid highways
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                <input type="checkbox" name="avoid_tolls" checked={form.avoid_tolls} onChange={handleChange} />
-                Avoid tolls
-              </label>
-            </div>
-          </div>
+            </>
+          )}
 
           {error && <p style={{ color: 'var(--danger)', marginBottom: '1rem' }}>{error}</p>}
 
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem' }}>
             <button type="submit" className="btn btn-primary" disabled={loading}>
-              {loading ? 'Saving...' : 'Save Changes'}
+              {loading ? 'Saving...' : 'Save changes'}
             </button>
             <button type="button" className="btn btn-secondary" onClick={onCancel}>
               Cancel

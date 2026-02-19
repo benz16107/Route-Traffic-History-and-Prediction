@@ -1,26 +1,64 @@
 import { shortenToStreet } from './formatAddress.js'
 
-/**
- * Main title for a job: custom name, or "start_name → end_name", or shortened addresses.
- */
-export function getJobTitle(job) {
-  if (!job) return '—'
-  if (job.name && job.name.trim()) return job.name.trim()
-  if (job.start_name || job.end_name) {
-    return `${job.start_name || 'Start'} → ${job.end_name || 'End'}`
-  }
-  const start = shortenToStreet(job.start_location) || '—'
-  const end = shortenToStreet(job.end_location) || '—'
-  return `${start} → ${end}`
+function str(val) {
+  if (val == null) return ''
+  const s = String(val).trim()
+  return s
+}
+
+/** Get a string field from job by key (tries snake_case and camelCase). */
+function getField(job, snakeKey) {
+  if (!job || typeof job !== 'object') return ''
+  const camelKey = snakeKey.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+  const v = job[snakeKey] ?? job[camelKey]
+  return str(v)
+}
+
+/** Get custom start name from job. */
+function getStartName(job) {
+  return getField(job, 'start_name')
+}
+
+/** Get custom end name from job. */
+function getEndName(job) {
+  return getField(job, 'end_name')
+}
+
+/** Get route title (custom name) from job. */
+function getRouteName(job) {
+  return getField(job, 'name') || getField(job, 'routeName')
 }
 
 /**
- * Subtitle when job has a custom title and start/end names: "start_name → end_name".
+ * Main title for a job:
+ * - If route title (name) is entered → use it.
+ * - Else if custom start or end name is entered → "start_name → end_name" (address used for the side without a name).
+ * - Else → shortened start and end addresses only.
+ */
+export function getJobTitle(job) {
+  if (!job) return '—'
+  const routeName = getRouteName(job)
+  if (routeName) return routeName
+  const startName = getStartName(job)
+  const endName = getEndName(job)
+  const startLabel = startName || shortenToStreet(job.start_location) || '—'
+  const endLabel = endName || shortenToStreet(job.end_location) || '—'
+  return `${startLabel} → ${endLabel}`
+}
+
+/**
+ * Subtitle when job has a custom route title and at least one start/end name: "start_name → end_name".
  */
 export function getJobSubtitle(job) {
-  if (!job || !(job.name && job.name.trim())) return null
-  if (!job.start_name && !job.end_name) return null
-  return `${job.start_name || 'Start'} → ${job.end_name || 'End'}`
+  if (!job) return null
+  const routeName = getRouteName(job)
+  if (!routeName) return null
+  const startName = getStartName(job)
+  const endName = getEndName(job)
+  if (!startName && !endName) return null
+  const startLabel = startName || shortenToStreet(job.start_location) || '—'
+  const endLabel = endName || shortenToStreet(job.end_location) || '—'
+  return `${startLabel} → ${endLabel}`
 }
 
 /**

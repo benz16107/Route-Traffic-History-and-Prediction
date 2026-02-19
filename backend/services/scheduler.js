@@ -4,11 +4,15 @@ import { getRoutes } from './googleMaps.js';
 
 const activeIntervals = new Map();
 
+const MIN_CYCLE_SECONDS = Math.max(60, parseInt(process.env.MIN_CYCLE_SECONDS, 10) || 300);
+
 function getCycleIntervalSeconds(job) {
   const sec = parseInt(job?.cycle_seconds, 10);
-  if (!Number.isNaN(sec) && sec > 0) return Math.max(10, sec);
+  const fromSec = !Number.isNaN(sec) && sec > 0 ? sec : null;
   const min = parseInt(job?.cycle_minutes, 10);
-  return (Number.isNaN(min) || min <= 0 ? 60 : min) * 60;
+  const fromMin = !Number.isNaN(min) && min > 0 ? min * 60 : null;
+  const raw = fromSec ?? fromMin ?? 3600;
+  return Math.max(MIN_CYCLE_SECONDS, raw);
 }
 
 function addMinutes(dateStr, minutes) {

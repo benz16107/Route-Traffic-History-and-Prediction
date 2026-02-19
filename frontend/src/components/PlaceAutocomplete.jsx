@@ -32,7 +32,7 @@ export default function PlaceAutocomplete({ value, onChange, placeholder, id, re
   }, [])
 
   useEffect(() => {
-    if (!value || value.length < 2) {
+    if (!value || value.length < 3) {
       setSuggestions([])
       return
     }
@@ -50,7 +50,7 @@ export default function PlaceAutocomplete({ value, onChange, placeholder, id, re
       } finally {
         setLoading(false)
       }
-    }, 250)
+    }, 400)
     return () => clearTimeout(t)
   }, [value, country])
 

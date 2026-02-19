@@ -41,7 +41,6 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
   const [editing, setEditing] = useState(false)
   const [expandedSnapshotId, setExpandedSnapshotId] = useState(null)
   const [countdown, setCountdown] = useState(null)
-  const [showActions, setShowActions] = useState(false)
   const [chartRange, setChartRange] = useState('24h')
   const [showAverageLine, setShowAverageLine] = useState(true)
   const [showMinMaxLines, setShowMinMaxLines] = useState(true)
@@ -53,8 +52,8 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
   const fetchData = async () => {
     try {
       const [jobData, snapData] = await Promise.all([
-        fetchJson(`${API}/jobs/${jobId}`),
-        fetchJson(`${API}/jobs/${jobId}/snapshots`),
+        fetchJson(`${API}/jobs/${jobId}`, { cache: 'no-store' }),
+        fetchJson(`${API}/jobs/${jobId}/snapshots`, { cache: 'no-store' }),
       ])
       setJob(jobData)
       setSnapshots(Array.isArray(snapData) ? snapData : [])
@@ -104,7 +103,6 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
 
   const runAction = async (action) => {
     setActionLoading(action)
-    setShowActions(false)
     try {
       const data = await fetchJson(`${API}/jobs/${jobId}/${action}`, { method: 'POST' })
       setJob(data)
@@ -117,12 +115,10 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
   }
 
   const handleExport = (format) => {
-    setShowActions(false)
     window.open(`${API}/jobs/${jobId}/export?format=${format}`, '_blank')
   }
 
   const handleDelete = async () => {
-    setShowActions(false)
     if (!window.confirm('Delete this job and all its collected data? This cannot be undone.')) return
     setActionLoading('delete')
     try {
@@ -138,7 +134,6 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
   const handleCreateFlippedJob = async () => {
     if (!job) return
     setActionLoading('flip')
-    setShowActions(false)
     try {
       const payload = {
         start_location: job.end_location,
@@ -340,36 +335,20 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
           <div className="job-meta-line">
             <span className="job-meta-text">{formatJobMetaShort(job)}</span>
             <div className="job-detail-actions">
-              {job.status === 'running' && (
-                <>
-                  <ActionBtn variant="warning" onClick={() => runAction('pause')} disabled={!!actionLoading}>{actionLoading === 'pause' ? '…' : 'Pause'}</ActionBtn>
-                  <ActionBtn variant="danger" onClick={() => runAction('stop')} disabled={!!actionLoading}>{actionLoading === 'stop' ? '…' : 'Stop'}</ActionBtn>
-                </>
+              {String(job.status).toLowerCase() === 'running' && (
+                <ActionBtn variant="warning" onClick={() => runAction('pause')} disabled={!!actionLoading}>{actionLoading === 'pause' ? '…' : 'Pause'}</ActionBtn>
               )}
-              {job.status === 'paused' && (
-                <>
-                  <ActionBtn variant="success" onClick={() => runAction('resume')} disabled={!!actionLoading}>{actionLoading === 'resume' ? '…' : 'Resume'}</ActionBtn>
-                  <ActionBtn variant="danger" onClick={() => runAction('stop')} disabled={!!actionLoading}>{actionLoading === 'stop' ? '…' : 'Stop'}</ActionBtn>
-                </>
+              {String(job.status).toLowerCase() === 'paused' && (
+                <ActionBtn variant="success" onClick={() => runAction('resume')} disabled={!!actionLoading}>{actionLoading === 'resume' ? '…' : 'Resume'}</ActionBtn>
               )}
-              {job.status !== 'running' && job.status !== 'paused' && (
-                <ActionBtn onClick={() => setEditing(true)}>Edit</ActionBtn>
+              {String(job.status).toLowerCase() !== 'running' && String(job.status).toLowerCase() !== 'paused' && (
+                <ActionBtn variant="success" onClick={() => runAction('start')} disabled={!!actionLoading}>{actionLoading === 'start' ? '…' : 'Start'}</ActionBtn>
               )}
-              <div className="job-actions-dropdown">
-                <button className="btn btn-secondary btn-sm" onClick={() => setShowActions(!showActions)} aria-label="More options">⋮</button>
-                {showActions && (
-                  <>
-                    <div className="job-actions-overlay" onClick={() => setShowActions(false)} />
-                    <div className="job-actions-menu">
-                      <button onClick={() => { setShowActions(false); setEditing(true); }} disabled={!!actionLoading}>Edit</button>
-                      <button onClick={handleCreateFlippedJob} disabled={!!actionLoading}>Reverse route</button>
-                      <button onClick={() => handleExport('json')}>Export JSON</button>
-                      <button onClick={() => handleExport('csv')}>Export CSV</button>
-                      <button className="danger" onClick={handleDelete} disabled={!!actionLoading}>{actionLoading === 'delete' ? 'Deleting…' : 'Delete'}</button>
-                    </div>
-                  </>
-                )}
-              </div>
+              <ActionBtn onClick={() => setEditing(true)}>Edit</ActionBtn>
+              <ActionBtn onClick={handleCreateFlippedJob} disabled={!!actionLoading}>Reverse route</ActionBtn>
+              <ActionBtn onClick={() => handleExport('json')}>Export JSON</ActionBtn>
+              <ActionBtn onClick={() => handleExport('csv')}>Export CSV</ActionBtn>
+              <ActionBtn variant="danger" onClick={handleDelete} disabled={!!actionLoading}>{actionLoading === 'delete' ? 'Deleting…' : 'Delete'}</ActionBtn>
             </div>
           </div>
         </div>
@@ -378,7 +357,12 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
       {editing && (
         <EditJob
           job={job}
-          onSaved={(updated) => { setJob(updated); setEditing(false); fetchData() }}
+          isRunning={String(job.status).toLowerCase() === 'running'}
+          onSaved={(updated) => {
+            setJob(updated)
+            setEditing(false)
+            fetchData()
+          }}
           onCancel={() => setEditing(false)}
         />
       )}

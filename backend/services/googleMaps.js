@@ -1,40 +1,83 @@
 /**
- * Google Maps Directions API client
- * Fetches route data: duration, distance, steps
+ * Google Maps API client with caching to reduce cost.
+ * - Geocoding & reverse geocode: cached 24h (addresses don't change).
+ * - Route polyline (preview): cached 5 min to avoid repeat calls when viewing maps.
+ * - Directions for collection (getRoutes): not cached (need fresh traffic).
  */
 const DIRECTIONS_API = 'https://maps.googleapis.com/maps/api/directions/json';
 const GEOCODE_API = 'https://maps.googleapis.com/maps/api/geocode/json';
+
+const GEOCODE_TTL_MS = 24 * 60 * 60 * 1000;   // 24h
+const ROUTE_PREVIEW_TTL_MS = 5 * 60 * 1000;   // 5 min
+
+const geocodeCache = new Map();
+const reverseGeocodeCache = new Map();
+const routePreviewCache = new Map();
+
+function cacheGet(map, key, ttlMs) {
+  const entry = map.get(key);
+  if (!entry) return undefined;
+  if (Date.now() - entry.at > ttlMs) {
+    map.delete(key);
+    return undefined;
+  }
+  return entry.value;
+}
+function cacheSet(map, key, value, ttlMs) {
+  map.set(key, { value, at: Date.now() });
+  if (map.size > 500) {
+    const cutoff = Date.now() - ttlMs;
+    for (const [k, v] of map.entries()) {
+      if (v.at < cutoff) map.delete(k);
+    }
+  }
+}
 
 function isLatLng(str) {
   return /^-?\d+\.?\d*,\s*-?\d+\.?\d*$/.test(String(str || '').trim());
 }
 
-async function geocodeAddress(addr) {
+async function geocodeAddressUncached(addr) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey || !addr?.trim()) return null;
+  const params = new URLSearchParams({ address: addr.trim(), key: apiKey });
+  const res = await fetch(`${GEOCODE_API}?${params}`);
+  const data = await res.json();
+  const loc = data.results?.[0]?.geometry?.location;
+  return loc ? `${loc.lat},${loc.lng}` : null;
+}
+
+async function geocodeAddress(addr) {
+  const key = String(addr || '').trim().toLowerCase();
+  if (!key) return null;
+  const cached = cacheGet(geocodeCache, key, GEOCODE_TTL_MS);
+  if (cached !== undefined) return cached;
   try {
-    const params = new URLSearchParams({ address: addr.trim(), key: apiKey });
-    const res = await fetch(`${GEOCODE_API}?${params}`);
-    const data = await res.json();
-    const loc = data.results?.[0]?.geometry?.location;
-    if (loc) return `${loc.lat},${loc.lng}`;
+    const result = await geocodeAddressUncached(addr);
+    if (result) cacheSet(geocodeCache, key, result, GEOCODE_TTL_MS);
+    return result;
   } catch (_) {}
   return null;
 }
 
-/** Reverse geocode lat,lng to a formatted address using Google Geocoding API */
+/** Reverse geocode lat,lng to address (cached 24h). */
 export async function reverseGeocode(lat, lng) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey || apiKey === 'your_api_key_here') {
     throw new Error('GOOGLE_MAPS_API_KEY not set in .env');
   }
+  const key = `${Number(lat).toFixed(5)},${Number(lng).toFixed(5)}`;
+  const cached = cacheGet(reverseGeocodeCache, key, GEOCODE_TTL_MS);
+  if (cached !== undefined) return cached;
   const params = new URLSearchParams({ latlng: `${lat},${lng}`, key: apiKey });
   const res = await fetch(`${GEOCODE_API}?${params}`);
   const data = await res.json();
   if (data.status !== 'OK' || !data.results?.[0]) {
     throw new Error(data.error_message || data.status || 'No address found');
   }
-  return data.results[0].formatted_address;
+  const address = data.results[0].formatted_address;
+  cacheSet(reverseGeocodeCache, key, address, GEOCODE_TTL_MS);
+  return address;
 }
 
 function decodePolyline(encoded) {
@@ -64,6 +107,10 @@ function decodePolyline(encoded) {
 
 export async function getRoutePolyline(origin, destination, options = {}) {
   const { mode = 'driving', avoidHighways = false, avoidTolls = false } = options;
+  const cacheKey = [origin, destination, mode, avoidHighways, avoidTolls].join('|');
+  const cached = cacheGet(routePreviewCache, cacheKey, ROUTE_PREVIEW_TTL_MS);
+  if (cached !== undefined) return cached;
+
   const params = new URLSearchParams({
     origin,
     destination,
@@ -105,11 +152,13 @@ export async function getRoutePolyline(origin, destination, options = {}) {
 
   const points = decodePolyline(encoded);
   const leg = route.legs?.[0];
-  return {
+  const result = {
     points,
     start: leg?.start_location ? [leg.start_location.lat, leg.start_location.lng] : points[0],
     end: leg?.end_location ? [leg.end_location.lat, leg.end_location.lng] : points[points.length - 1],
   };
+  cacheSet(routePreviewCache, cacheKey, result, ROUTE_PREVIEW_TTL_MS);
+  return result;
 }
 
 async function fetchDirections(origin, destination, { mode, avoidHighways, avoidTolls, alternatives, departureTime }) {

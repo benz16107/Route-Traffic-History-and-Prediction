@@ -63,6 +63,17 @@ npm run dev
 
 **Why does 3001 show an old UI?** The backend serves the built frontend from `frontend/dist`. That folder is only updated when you run `npm run build` in the frontend. While developing, use the Vite URL (e.g. 5174) to see live changes. To see your latest UI on 3001, run `npm run build` from the repo root (or `cd frontend && npm run build`), then reload http://localhost:3001.
 
+## Reducing API cost
+
+Google Maps APIs (Directions, Geocoding, Places) are billed per request. This app reduces cost by:
+
+- **Geocoding & reverse geocode** — Cached 24h in memory (same address = one API call per day).
+- **Route preview (map polyline)** — Cached 5 min so opening the same route map doesn’t re-call Directions.
+- **Collection interval** — Server enforces a minimum interval (default **5 minutes**). Set `MIN_CYCLE_SECONDS=300` in `.env` (or higher, e.g. 600 for 10 min). Jobs set to 1 min will still run at most every 5 min.
+- **Place autocomplete** — Requests only after 3 characters and 400 ms debounce to limit Places API calls.
+
+Set billing alerts and quotas in [Google Cloud Console](https://console.cloud.google.com/billing) to avoid surprises.
+
 ## Build for production
 
 ```bash
