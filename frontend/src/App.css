@@ -1304,6 +1304,19 @@ body {
   font-size: 0.75rem;
 }
 
+.job-chart-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.job-chart-toggle input {
+  width: auto;
+}
+
 .job-chart-wrap {
   height: 180px;
 }

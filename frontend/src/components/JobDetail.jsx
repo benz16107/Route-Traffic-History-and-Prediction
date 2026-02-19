@@ -7,6 +7,7 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  ReferenceLine,
 } from 'recharts'
 import RouteMap from './RouteMap'
 import EditJob from './EditJob'
@@ -27,6 +28,7 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
   const [showActions, setShowActions] = useState(false)
   const [chartRange, setChartRange] = useState('24h')
   const [chartSegment, setChartSegment] = useState('1h')
+  const [showAverageLine, setShowAverageLine] = useState(false)
 
   const fetchData = async () => {
     try {
@@ -188,6 +190,15 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
     ? new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
     : formatTime(new Date(ts).toISOString())
 
+  // Average over the currently selected range only
+  const chartDurations = chartData.map(d => d.duration).filter((v) => v != null)
+  const averageDuration = chartDurations.length > 0
+    ? chartDurations.reduce((a, b) => a + b, 0) / chartDurations.length
+    : null
+  const averageLabel = averageDuration != null
+    ? `Avg (${activeRange.label}): ${averageDuration.toFixed(1)} min`
+    : ''
+
   const latestSnap = primarySnapshots[primarySnapshots.length - 1]
 
   const ActionBtn = ({ onClick, children, variant = 'secondary', disabled }) => (
@@ -335,19 +346,29 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
                 ))}
               </div>
               {chartData.length > 0 && (
-                <div className="job-chart-range">
-                  <span className="job-chart-control-label">Tick:</span>
-                  {Object.keys(SEGMENT_MS).map(seg => (
-                    <button
-                      key={seg}
-                      type="button"
-                      className={`btn btn-sm ${chartSegment === seg ? 'btn-primary' : 'btn-ghost'}`}
-                      onClick={() => setChartSegment(seg)}
-                    >
-                      {seg}
-                    </button>
-                  ))}
-                </div>
+                <>
+                  <div className="job-chart-range">
+                    <span className="job-chart-control-label">Tick:</span>
+                    {Object.keys(SEGMENT_MS).map(seg => (
+                      <button
+                        key={seg}
+                        type="button"
+                        className={`btn btn-sm ${chartSegment === seg ? 'btn-primary' : 'btn-ghost'}`}
+                        onClick={() => setChartSegment(seg)}
+                      >
+                        {seg}
+                      </button>
+                    ))}
+                  </div>
+                  <label className="job-chart-toggle">
+                    <input
+                      type="checkbox"
+                      checked={showAverageLine}
+                      onChange={(e) => setShowAverageLine(e.target.checked)}
+                    />
+                    <span>Show average</span>
+                  </label>
+                </>
               )}
             </div>
           </div>
@@ -371,6 +392,15 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
                     labelFormatter={(ts) => formatXTick(ts)}
                   />
                   <Line type="monotone" dataKey="duration" name="min" stroke="var(--accent)" dot={false} connectNulls strokeWidth={2} />
+                  {showAverageLine && averageDuration != null && (
+                    <ReferenceLine
+                      y={averageDuration}
+                      stroke="var(--warning)"
+                      strokeDasharray="4 4"
+                      strokeWidth={1.5}
+                      label={{ value: averageLabel, position: 'right', fill: 'var(--text-muted)', fontSize: 10 }}
+                    />
+                  )}
                 </LineChart>
               </ResponsiveContainer>
             </div>
