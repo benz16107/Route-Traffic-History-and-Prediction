@@ -301,13 +301,13 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
               <span className="job-stat-value">{primarySnapshots.length}</span>
             </div>
             <div className="job-stat-cell">
-              <span className="job-stat-label">Lowest time</span>
+              <span className="job-stat-label">All time low</span>
               <span className="job-stat-value job-stat-success">
                 {minDuration != null ? `${Math.round(minDuration / 60)} min` : '—'}
               </span>
             </div>
             <div className="job-stat-cell">
-              <span className="job-stat-label">Highest time</span>
+              <span className="job-stat-label">All time high</span>
               <span className="job-stat-value job-stat-warning">
                 {maxDuration != null ? `${Math.round(maxDuration / 60)} min` : '—'}
               </span>
