@@ -6,7 +6,7 @@ import rateLimit from 'express-rate-limit';
 import { v4 as uuidv4 } from 'uuid';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { initDatabase, getDb } from './db/init.js';
+import { initDatabase, getDb } from './db/index.js';
 import { startJob, stopJob, pauseJob, resumeJob, restoreRunningJobs } from './services/scheduler.js';
 import { getRoutePolyline, reverseGeocode } from './services/googleMaps.js';
 import { mkdirSync, existsSync } from 'fs';
@@ -17,7 +17,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDir = join(__dirname, 'data');
 if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 
-initDatabase();
 const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
 // Behind a reverse proxy (e.g. DigitalOcean); trust X-Forwarded-* so rate limiter sees real client IP
@@ -128,13 +127,14 @@ app.get('/api/auth/config', (req, res) => {
   });
 });
 
-app.get('/api/auth/me', (req, res) => {
+app.get('/api/auth/me', async (req, res) => {
   if (!authEnabled) return res.json({ ok: true, authEnabled: false });
   if (isAuthenticated(req)) {
     const sessionUser = req.session?.user || null;
     let hasPassword = false;
     if (sessionUser?.email) {
-      const row = getDb().prepare('SELECT password_hash FROM users WHERE email = ?').get(sessionUser.email);
+      const db = await getDb();
+      const row = await db.queryOne('SELECT password_hash FROM users WHERE email = ?', [sessionUser.email]);
       hasPassword = !!(row && row.password_hash);
     }
     return res.json({
@@ -151,8 +151,8 @@ app.post('/api/auth/login', async (req, res) => {
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   if (!authEnabled) return res.json({ ok: true, authEnabled: false });
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-  const db = getDb();
-  const userRow = db.prepare('SELECT id, email, name, password_hash FROM users WHERE email = ?').get(email);
+  const db = await getDb();
+  const userRow = await db.queryOne('SELECT id, email, name, password_hash FROM users WHERE email = ?', [email]);
   if (!userRow) {
     if (authPassword.length > 0 && password === authPassword) {
       req.session.authenticated = true;
@@ -176,12 +176,12 @@ app.post('/api/auth/register', async (req, res) => {
   if (!authEnabled) return res.status(400).json({ error: 'Registration not available' });
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
   if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-  const db = getDb();
-  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+  const db = await getDb();
+  const existing = await db.queryOne('SELECT id FROM users WHERE email = ?', [email]);
   if (existing) return res.status(409).json({ error: 'An account with this email already exists. Log in or use a different email.' });
   const id = uuidv4();
   const passwordHash = await bcrypt.hash(password, 10);
-  db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(id, email, name || null, passwordHash);
+  await db.run('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)', [id, email, name || null, passwordHash]);
   req.session.authenticated = true;
   req.session.user = { email, name: name || null, picture: null };
   res.status(201).json({ ok: true, authEnabled: true, user: req.session.user });
@@ -194,14 +194,14 @@ app.post('/api/auth/change-password', async (req, res) => {
   const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
   if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Current password and new password required' });
   if (newPassword.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters' });
-  const db = getDb();
+  const db = await getDb();
   const email = req.session.user.email;
-  const row = db.prepare('SELECT id, password_hash FROM users WHERE email = ?').get(email);
+  const row = await db.queryOne('SELECT id, password_hash FROM users WHERE email = ?', [email]);
   if (!row || !row.password_hash) return res.status(400).json({ error: 'This account uses Google sign-in. Password cannot be changed.' });
   const match = await bcrypt.compare(currentPassword, row.password_hash);
   if (!match) return res.status(401).json({ error: 'Current password is incorrect' });
   const passwordHash = await bcrypt.hash(newPassword, 10);
-  db.prepare('UPDATE users SET password_hash = ? WHERE email = ?').run(passwordHash, email);
+  await db.run('UPDATE users SET password_hash = ? WHERE email = ?', [passwordHash, email]);
   res.json({ ok: true });
 });
 
@@ -298,12 +298,12 @@ app.get('/api/auth/google/callback', async (req, res) => {
   const user = await userRes.json();
   const email = (user.email || '').trim().toLowerCase();
   if (!email) return res.redirect(`${frontendUrl}?auth_error=userinfo`);
-  const db = getDb();
-  let userRow = db.prepare('SELECT id, email, name FROM users WHERE email = ?').get(email);
+  const db = await getDb();
+  let userRow = await db.queryOne('SELECT id, email, name FROM users WHERE email = ?', [email]);
   if (!userRow) {
     const id = uuidv4();
-    db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, NULL)').run(id, email, (user.name || '').trim() || null);
-    userRow = db.prepare('SELECT id, email, name FROM users WHERE email = ?').get(email);
+    await db.run('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, NULL)', [id, email, (user.name || '').trim() || null]);
+    userRow = await db.queryOne('SELECT id, email, name FROM users WHERE email = ?', [email]);
   }
   req.session.authenticated = true;
   req.session.user = {
@@ -332,17 +332,17 @@ function getCurrentUserId(req) {
 }
 
 /** Ensure job belongs to current user; returns job or null. */
-function getJobForUser(db, jobId, userId) {
-  const job = db.prepare('SELECT * FROM collection_jobs WHERE id = ? AND user_id = ?').get(jobId, userId);
+async function getJobForUser(db, jobId, userId) {
+  const job = await db.queryOne('SELECT * FROM collection_jobs WHERE id = ? AND user_id = ?', [jobId, userId]);
   return job || null;
 }
 
 // API: List jobs (only current user's)
-app.get('/api/jobs', (req, res) => {
+app.get('/api/jobs', async (req, res) => {
   try {
     const userId = getCurrentUserId(req);
-    const db = getDb();
-    const jobs = db.prepare('SELECT * FROM collection_jobs WHERE user_id = ? ORDER BY created_at DESC').all(userId);
+    const db = await getDb();
+    const jobs = await db.query('SELECT * FROM collection_jobs WHERE user_id = ? ORDER BY created_at DESC', [userId]);
     res.json(jobs.map(toJobResponse));
   } catch (e) {
     handleError(res, e, 'GET /api/jobs');
@@ -350,10 +350,10 @@ app.get('/api/jobs', (req, res) => {
 });
 
 // API: Get single job
-app.get('/api/jobs/:id', (req, res) => {
+app.get('/api/jobs/:id', async (req, res) => {
   try {
-    const db = getDb();
-    const job = getJobForUser(db, req.params.id, getCurrentUserId(req));
+    const db = await getDb();
+    const job = await getJobForUser(db, req.params.id, getCurrentUserId(req));
     if (!job) return res.status(404).json({ error: 'Job not found' });
     res.json(toJobResponse(job));
   } catch (e) {
@@ -362,7 +362,7 @@ app.get('/api/jobs/:id', (req, res) => {
 });
 
 // API: Create job
-app.post('/api/jobs', (req, res) => {
+app.post('/api/jobs', async (req, res) => {
   try {
     const {
       name,
@@ -386,33 +386,17 @@ app.post('/api/jobs', (req, res) => {
 
     const id = uuidv4();
     const userId = getCurrentUserId(req);
-    const db = getDb();
+    const db = await getDb();
     const jobName = name != null && String(name).trim() !== '' ? String(name).trim() : null;
     const startName = (bodyStartName ?? req.body.startName) != null && String(bodyStartName ?? req.body.startName).trim() !== '' ? String(bodyStartName ?? req.body.startName).trim() : null;
     const endName = (bodyEndName ?? req.body.endName) != null && String(bodyEndName ?? req.body.endName).trim() !== '' ? String(bodyEndName ?? req.body.endName).trim() : null;
-    db.prepare(`
-      INSERT INTO collection_jobs (id, user_id, name, start_name, end_name, start_location, end_location, start_time, end_time, cycle_minutes, cycle_seconds, duration_days, navigation_type, avoid_highways, avoid_tolls, additional_routes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      userId,
-      jobName,
-      startName,
-      endName,
-      start_location,
-      end_location,
-      start_time || null,
-      end_time || null,
-      cycle_minutes,
-      cycle_seconds || 0,
-      duration_days,
-      navigation_type,
-      avoid_highways ? 1 : 0,
-      avoid_tolls ? 1 : 0,
-      0
+    await db.run(
+      `INSERT INTO collection_jobs (id, user_id, name, start_name, end_name, start_location, end_location, start_time, end_time, cycle_minutes, cycle_seconds, duration_days, navigation_type, avoid_highways, avoid_tolls, additional_routes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, userId, jobName, startName, endName, start_location, end_location, start_time || null, end_time || null, cycle_minutes, cycle_seconds || 0, duration_days, navigation_type, avoid_highways ? 1 : 0, avoid_tolls ? 1 : 0, 0]
     );
 
-    const job = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(id);
+    const job = await db.queryOne('SELECT * FROM collection_jobs WHERE id = ?', [id]);
     res.status(201).json(toJobResponse(job));
   } catch (e) {
     handleError(res, e, 'POST /api/jobs');
@@ -420,20 +404,19 @@ app.post('/api/jobs', (req, res) => {
 });
 
 // API: Update job. Running jobs can be edited (name/start_name/end_name only); no 400.
-app.patch('/api/jobs/:id', (req, res) => {
+app.patch('/api/jobs/:id', async (req, res) => {
   try {
     if (!req.body || typeof req.body !== 'object') {
       return res.status(400).json({ error: 'Request body required' });
     }
-    const db = getDb();
-    const job = getJobForUser(db, req.params.id, getCurrentUserId(req));
+    const db = await getDb();
+    const job = await getJobForUser(db, req.params.id, getCurrentUserId(req));
     if (!job) return res.status(404).json({ error: 'Job not found' });
 
     const isRunning = String(job.status).toLowerCase() === 'running';
     const strOrNull = (v) => (v === '' || v == null ? null : String(v).trim() || null);
     const body = req.body;
 
-    // Read name fields (support snake_case and camelCase)
     const name = body.name ?? body.routeName;
     const start_name = body.start_name ?? body.startName;
     const end_name = body.end_name ?? body.endName;
@@ -441,7 +424,6 @@ app.patch('/api/jobs/:id', (req, res) => {
     const updates = [];
     const values = [];
 
-    // Always update name fields when key was sent (undefined = not sent, null = clear)
     if (Object.prototype.hasOwnProperty.call(body, 'name') || Object.prototype.hasOwnProperty.call(body, 'routeName')) {
       updates.push('name = ?');
       values.push(strOrNull(name));
@@ -467,12 +449,12 @@ app.patch('/api/jobs/:id', (req, res) => {
     }
 
     if (updates.length) {
-      updates.push("updated_at = datetime('now')");
+      updates.push(process.env.DATABASE_URL ? 'updated_at = CURRENT_TIMESTAMP' : "updated_at = datetime('now')");
       values.push(req.params.id);
-      db.prepare(`UPDATE collection_jobs SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+      await db.run(`UPDATE collection_jobs SET ${updates.join(', ')} WHERE id = ?`, values);
     }
 
-    const updated = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(req.params.id);
+    const updated = await db.queryOne('SELECT * FROM collection_jobs WHERE id = ?', [req.params.id]);
     res.json(toJobResponse(updated));
   } catch (e) {
     handleError(res, e, 'PATCH /api/jobs/:id');
@@ -480,14 +462,14 @@ app.patch('/api/jobs/:id', (req, res) => {
 });
 
 // API: Delete job
-app.delete('/api/jobs/:id', (req, res) => {
+app.delete('/api/jobs/:id', async (req, res) => {
   try {
-    const db = getDb();
-    const job = getJobForUser(db, req.params.id, getCurrentUserId(req));
+    const db = await getDb();
+    const job = await getJobForUser(db, req.params.id, getCurrentUserId(req));
     if (!job) return res.status(404).json({ error: 'Job not found' });
-    stopJob(req.params.id);
-    db.prepare('DELETE FROM route_snapshots WHERE job_id = ?').run(req.params.id);
-    db.prepare('DELETE FROM collection_jobs WHERE id = ? AND user_id = ?').run(req.params.id, getCurrentUserId(req));
+    await stopJob(req.params.id);
+    await db.run('DELETE FROM route_snapshots WHERE job_id = ?', [req.params.id]);
+    await db.run('DELETE FROM collection_jobs WHERE id = ? AND user_id = ?', [req.params.id, getCurrentUserId(req)]);
     res.json({ ok: true });
   } catch (e) {
     handleError(res, e, 'DELETE /api/jobs/:id');
@@ -497,11 +479,11 @@ app.delete('/api/jobs/:id', (req, res) => {
 // API: Start job
 app.post('/api/jobs/:id/start', async (req, res) => {
   try {
-    const db = getDb();
-    const job = getJobForUser(db, req.params.id, getCurrentUserId(req));
+    const db = await getDb();
+    const job = await getJobForUser(db, req.params.id, getCurrentUserId(req));
     if (!job) return res.status(404).json({ error: 'Job not found' });
     await startJob(req.params.id);
-    const updated = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(req.params.id);
+    const updated = await db.queryOne('SELECT * FROM collection_jobs WHERE id = ?', [req.params.id]);
     res.json(toJobResponse(updated));
   } catch (e) {
     handleError(res, e, 'POST /api/jobs/:id/start');
@@ -509,13 +491,13 @@ app.post('/api/jobs/:id/start', async (req, res) => {
 });
 
 // API: Stop job
-app.post('/api/jobs/:id/stop', (req, res) => {
+app.post('/api/jobs/:id/stop', async (req, res) => {
   try {
-    const db = getDb();
-    const job = getJobForUser(db, req.params.id, getCurrentUserId(req));
+    const db = await getDb();
+    const job = await getJobForUser(db, req.params.id, getCurrentUserId(req));
     if (!job) return res.status(404).json({ error: 'Job not found' });
     stopJob(req.params.id);
-    const updated = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(req.params.id);
+    const updated = await db.queryOne('SELECT * FROM collection_jobs WHERE id = ?', [req.params.id]);
     res.json(toJobResponse(updated));
   } catch (e) {
     handleError(res, e, 'POST /api/jobs/:id/stop');
@@ -523,13 +505,13 @@ app.post('/api/jobs/:id/stop', (req, res) => {
 });
 
 // API: Pause job
-app.post('/api/jobs/:id/pause', (req, res) => {
+app.post('/api/jobs/:id/pause', async (req, res) => {
   try {
-    const db = getDb();
-    const job = getJobForUser(db, req.params.id, getCurrentUserId(req));
+    const db = await getDb();
+    const job = await getJobForUser(db, req.params.id, getCurrentUserId(req));
     if (!job) return res.status(404).json({ error: 'Job not found' });
     pauseJob(req.params.id);
-    const updated = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(req.params.id);
+    const updated = await db.queryOne('SELECT * FROM collection_jobs WHERE id = ?', [req.params.id]);
     res.json(toJobResponse(updated));
   } catch (e) {
     handleError(res, e, 'POST /api/jobs/:id/pause');
@@ -539,11 +521,11 @@ app.post('/api/jobs/:id/pause', (req, res) => {
 // API: Resume job
 app.post('/api/jobs/:id/resume', async (req, res) => {
   try {
-    const db = getDb();
-    const job = getJobForUser(db, req.params.id, getCurrentUserId(req));
+    const db = await getDb();
+    const job = await getJobForUser(db, req.params.id, getCurrentUserId(req));
     if (!job) return res.status(404).json({ error: 'Job not found' });
     await resumeJob(req.params.id);
-    const updated = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(req.params.id);
+    const updated = await db.queryOne('SELECT * FROM collection_jobs WHERE id = ?', [req.params.id]);
     res.json(toJobResponse(updated));
   } catch (e) {
     handleError(res, e, 'POST /api/jobs/:id/resume');
@@ -622,14 +604,12 @@ app.get('/api/route-preview', async (req, res) => {
 });
 
 // API: Get snapshots for job
-app.get('/api/jobs/:id/snapshots', (req, res) => {
+app.get('/api/jobs/:id/snapshots', async (req, res) => {
   try {
-    const db = getDb();
-    const job = getJobForUser(db, req.params.id, getCurrentUserId(req));
+    const db = await getDb();
+    const job = await getJobForUser(db, req.params.id, getCurrentUserId(req));
     if (!job) return res.status(404).json({ error: 'Job not found' });
-    const snapshots = db.prepare(
-      'SELECT * FROM route_snapshots WHERE job_id = ? ORDER BY collected_at ASC'
-    ).all(req.params.id);
+    const snapshots = await db.query('SELECT * FROM route_snapshots WHERE job_id = ? ORDER BY collected_at ASC', [req.params.id]);
     res.json(snapshots);
   } catch (e) {
     handleError(res, e, 'GET /api/jobs/:id/snapshots');
@@ -637,16 +617,14 @@ app.get('/api/jobs/:id/snapshots', (req, res) => {
 });
 
 // API: Export job data (CSV or JSON)
-app.get('/api/jobs/:id/export', (req, res) => {
+app.get('/api/jobs/:id/export', async (req, res) => {
   try {
     const format = req.query.format || 'json';
-    const db = getDb();
-    const job = getJobForUser(db, req.params.id, getCurrentUserId(req));
+    const db = await getDb();
+    const job = await getJobForUser(db, req.params.id, getCurrentUserId(req));
     if (!job) return res.status(404).json({ error: 'Job not found' });
 
-    const snapshots = db.prepare(
-      'SELECT * FROM route_snapshots WHERE job_id = ? ORDER BY collected_at ASC'
-    ).all(req.params.id);
+    const snapshots = await db.query('SELECT * FROM route_snapshots WHERE job_id = ? ORDER BY collected_at ASC', [req.params.id]);
 
     if (format === 'csv') {
       const header = 'collected_at,duration_seconds,distance_meters,duration_minutes\n';
@@ -678,7 +656,10 @@ if (existsSync(frontendPath)) {
 }
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
-  restoreRunningJobs();
-});
+(async () => {
+  await initDatabase();
+  app.listen(PORT, () => {
+    console.log(`Server running at http://localhost:${PORT}`);
+    restoreRunningJobs().catch((e) => console.error('[Scheduler] restoreRunningJobs:', e.message));
+  });
+})();

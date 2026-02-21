@@ -160,7 +160,8 @@ npm run build
 
 ### 4. Keep the database across deploys
 
-- **Railway / Render / Fly.io:** Attach a volume to the path that contains `backend/data` (where `traffic.db` is created). Without a volume, the DB is lost on each deploy or restart.
+- **DigitalOcean App Platform:** App Platform **does not support volumes**. To keep user data you must add a **database** (Add components → Create or attach database → PostgreSQL). The app does not yet use PostgreSQL; see [docs/DIGITALOCEAN-APP-PLATFORM.md](docs/DIGITALOCEAN-APP-PLATFORM.md) for steps and options.
+- **Railway / Render / Fly.io:** Attach a volume and set **`DATA_DIR`** to the mount path (e.g. `DATA_DIR=/data`).
 - **VPS:** The app writes to `backend/data/` by default; just don’t delete that folder.
 
 ### 5. Restrict and monitor your Google API key
@@ -179,7 +180,7 @@ npm run build
 
 - [ ] `npm run build` and run `node backend/server.js`; test at the host’s URL.
 - [ ] Set `GOOGLE_MAPS_API_KEY` and `VITE_GOOGLE_MAPS_API_KEY` (and build with the latter if needed).
-- [ ] Attach a persistent volume for `backend/data` (or equivalent) so the DB is not lost.
+- [ ] Attach a persistent volume and set **`DATA_DIR`** to its mount path (e.g. `DATA_DIR=/data`) so users and routes are not lost on redeploy.
 - [ ] Restrict Google API keys (referrer for frontend, IP/API for backend) and set billing alerts.
 - [ ] (Optional) Set `AUTH_PASSWORD` on the host to require login.
 

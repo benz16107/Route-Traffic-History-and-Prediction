@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { getDb } from '../db/init.js';
+import { getDb } from '../db/index.js';
 import { getRoutes } from './googleMaps.js';
 
 const activeIntervals = new Map();
@@ -28,15 +28,15 @@ function addDays(dateStr, days) {
 }
 
 export async function runCollectionCycle(jobId) {
-  const db = getDb();
-  const job = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(jobId);
+  const db = await getDb();
+  const job = await db.queryOne('SELECT * FROM collection_jobs WHERE id = ?', [jobId]);
   if (!job) return;
   if (job.status !== 'running') return;
 
   const now = new Date().toISOString();
   const endTime = job.end_time ? new Date(job.end_time) : addDays(now, job.duration_days || 7);
   if (new Date(now) > endTime) {
-    stopJob(jobId);
+    await stopJob(jobId);
     return;
   }
 
@@ -50,32 +50,20 @@ export async function runCollectionCycle(jobId) {
       console.warn(`[Scheduler] Job ${jobId}: No routes returned for ${job.start_location} → ${job.end_location}`);
       return;
     }
-    const stmt = db.prepare(`
-        INSERT INTO route_snapshots (id, job_id, route_index, collected_at, duration_seconds, distance_meters, route_details)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `);
-
-      for (const route of routes) {
-        const routeDetails = {
-          points: route.points ?? [],
-          start: route.start ?? null,
-          end: route.end ?? null,
-          steps: route.steps ?? [],
-          summary: route.summary ?? null,
-        };
-        stmt.run(
-          uuidv4(),
-          jobId,
-          route.routeIndex ?? 0,
-          now,
-          route.durationSeconds,
-          route.distanceMeters,
-          JSON.stringify(routeDetails)
-        );
-      }
-
-    db.prepare('UPDATE collection_jobs SET updated_at = ? WHERE id = ?')
-      .run(now, jobId);
+    for (const route of routes) {
+      const routeDetails = {
+        points: route.points ?? [],
+        start: route.start ?? null,
+        end: route.end ?? null,
+        steps: route.steps ?? [],
+        summary: route.summary ?? null,
+      };
+      await db.run(
+        'INSERT INTO route_snapshots (id, job_id, route_index, collected_at, duration_seconds, distance_meters, route_details) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [uuidv4(), jobId, route.routeIndex ?? 0, now, route.durationSeconds, route.distanceMeters, JSON.stringify(routeDetails)]
+      );
+    }
+    await db.run('UPDATE collection_jobs SET updated_at = ? WHERE id = ?', [now, jobId]);
     console.log(`[Scheduler] Job ${jobId}: Collected ${routes.length} route(s)`);
   } catch (err) {
     console.error(`[Scheduler] Job ${jobId} error:`, err.message);
@@ -83,8 +71,8 @@ export async function runCollectionCycle(jobId) {
 }
 
 export async function startJob(jobId) {
-  const db = getDb();
-  const job = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(jobId);
+  const db = await getDb();
+  const job = await db.queryOne('SELECT * FROM collection_jobs WHERE id = ?', [jobId]);
   if (!job) throw new Error('Job not found');
   if (job.status === 'running') return;
 
@@ -93,41 +81,40 @@ export async function startJob(jobId) {
     activeIntervals.delete(jobId);
   }
 
-  db.prepare('UPDATE collection_jobs SET status = ? WHERE id = ?').run('running', jobId);
+  await db.run('UPDATE collection_jobs SET status = ? WHERE id = ?', ['running', jobId]);
 
   const intervalSeconds = getCycleIntervalSeconds(job);
   const intervalMs = intervalSeconds * 1000;
   const id = setInterval(() => runCollectionCycle(jobId), intervalMs);
   activeIntervals.set(jobId, { stop: () => clearInterval(id) });
-  await runCollectionCycle(jobId); // Run first collection immediately before returning
+  await runCollectionCycle(jobId);
 }
 
-export function stopJob(jobId) {
+export async function stopJob(jobId) {
   const entry = activeIntervals.get(jobId);
   if (entry) {
     entry.stop();
     activeIntervals.delete(jobId);
   }
-  const db = getDb();
-  db.prepare('UPDATE collection_jobs SET status = ? WHERE id = ?').run('completed', jobId);
+  const db = await getDb();
+  await db.run('UPDATE collection_jobs SET status = ? WHERE id = ?', ['completed', jobId]);
 }
 
-export function pauseJob(jobId) {
+export async function pauseJob(jobId) {
   const entry = activeIntervals.get(jobId);
   if (entry) {
     entry.stop();
     activeIntervals.delete(jobId);
   }
-  const db = getDb();
-  db.prepare('UPDATE collection_jobs SET status = ? WHERE id = ?').run('paused', jobId);
+  const db = await getDb();
+  await db.run('UPDATE collection_jobs SET status = ? WHERE id = ?', ['paused', jobId]);
 }
 
 export async function resumeJob(jobId) {
-  const db = getDb();
-  const job = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(jobId);
+  const db = await getDb();
+  const job = await db.queryOne('SELECT * FROM collection_jobs WHERE id = ?', [jobId]);
   if (!job) throw new Error('Job not found');
   if (job.status !== 'paused') return;
-
   await startJob(jobId);
 }
 
@@ -136,18 +123,18 @@ export function getActiveJobs() {
 }
 
 /** Restore intervals for jobs that were running before server restart */
-export function restoreRunningJobs() {
-  const db = getDb();
-  const running = db.prepare("SELECT id FROM collection_jobs WHERE status = 'running'").all();
+export async function restoreRunningJobs() {
+  const db = await getDb();
+  const running = await db.query("SELECT id FROM collection_jobs WHERE status = 'running'");
   for (const { id } of running) {
     try {
-      const job = db.prepare('SELECT * FROM collection_jobs WHERE id = ?').get(id);
+      const job = await db.queryOne('SELECT * FROM collection_jobs WHERE id = ?', [id]);
       if (!job) continue;
       const intervalSeconds = getCycleIntervalSeconds(job);
       const intervalMs = intervalSeconds * 1000;
       const intervalId = setInterval(() => runCollectionCycle(id), intervalMs);
       activeIntervals.set(id, { stop: () => clearInterval(intervalId) });
-      runCollectionCycle(id); // Run immediately
+      runCollectionCycle(id);
       console.log(`[Scheduler] Restored job ${id}`);
     } catch (e) {
       console.error(`[Scheduler] Failed to restore job ${id}:`, e.message);

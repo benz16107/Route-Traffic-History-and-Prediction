@@ -21,6 +21,7 @@
     "express-rate-limit": "^8.2.1",
     "express-session": "^1.19.0",
     "node-cron": "^3.0.3",
+    "pg": "^8.18.0",
     "uuid": "^10.0.0"
   },
   "devDependencies": {

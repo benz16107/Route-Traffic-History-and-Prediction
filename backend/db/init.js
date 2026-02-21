@@ -4,7 +4,10 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dataDir = join(__dirname, '..', 'data');
+// Use DATA_DIR for persistence on PaaS (e.g. mount a volume at /data and set DATA_DIR=/data)
+const dataDir = process.env.DATA_DIR
+  ? (process.env.DATA_DIR.startsWith('/') ? process.env.DATA_DIR : join(process.cwd(), process.env.DATA_DIR))
+  : join(__dirname, '..', 'data');
 const dbPath = join(dataDir, 'traffic.db');
 
 export function getDb() {
