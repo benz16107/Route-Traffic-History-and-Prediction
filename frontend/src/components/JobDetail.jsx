@@ -94,17 +94,6 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
     return () => clearInterval(t)
   }, [job?.status, job?.cycle_seconds, job?.cycle_minutes, snapshots])
 
-  useEffect(() => {
-    const el = chartScrollRef.current
-    if (!el) return
-    const scrollToRight = () => {
-      el.scrollLeft = el.scrollWidth - el.clientWidth
-    }
-    scrollToRight()
-    const t = requestAnimationFrame(scrollToRight)
-    return () => cancelAnimationFrame(t)
-  }, [job?.id, snapshots.length, chartRange])
-
   const runAction = async (action) => {
     setActionLoading(action)
     try {
@@ -334,6 +323,24 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
     setChartContainerWidth(el.clientWidth)
     return () => ro.disconnect()
   }, [chartData.length])
+
+  useEffect(() => {
+    const el = chartScrollRef.current
+    if (!el) return
+    const scrollToRight = () => {
+      el.scrollLeft = el.scrollWidth - el.clientWidth
+    }
+    scrollToRight()
+    const raf1 = requestAnimationFrame(() => {
+      scrollToRight()
+      requestAnimationFrame(scrollToRight)
+    })
+    const timeout = setTimeout(scrollToRight, 80)
+    return () => {
+      cancelAnimationFrame(raf1)
+      clearTimeout(timeout)
+    }
+  }, [job?.id, snapshots.length, chartRange, chartInnerWidth])
 
   const handleChartMouseMove = useCallback(
     (e) => {
