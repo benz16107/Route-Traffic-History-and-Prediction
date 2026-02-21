@@ -14,7 +14,13 @@ export function getPool() {
   if (!pool) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('DATABASE_URL is required for PostgreSQL');
-    pool = new Pool({ connectionString: url, ssl: url.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined });
+    // Supabase and most cloud DBs require SSL. Use pooler (port 6543) from Supabase for reachability from PaaS.
+    const useSsl = url.includes('sslmode=require') || url.includes('supabase.com');
+    pool = new Pool({
+      connectionString: url,
+      ssl: useSsl ? { rejectUnauthorized: false } : undefined,
+      connectionTimeoutMillis: 15000,
+    });
   }
   return pool;
 }
@@ -65,8 +71,16 @@ export async function initPostgres() {
     )`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)`,
   ];
-  for (const sql of statements) {
-    await pool.query(sql);
+  try {
+    for (const sql of statements) {
+      await pool.query(sql);
+    }
+  } catch (err) {
+    const msg = err?.message || String(err);
+    if (msg.includes('EHOSTUNREACH') || msg.includes('ECONNREFUSED') || msg.includes('connect')) {
+      console.error('[DB] Cannot reach PostgreSQL. If using Supabase, use the Connection pooler URI (port 6543), not the direct URI (port 5432). In Supabase: Project Settings → Database → Connection string → "Session" or "Transaction" mode.');
+    }
+    throw err;
   }
 }
 

@@ -37,6 +37,23 @@ The app **supports PostgreSQL**: when **`DATABASE_URL`** is set, it uses the man
 
 ---
 
+## Using Supabase (or another external PostgreSQL)
+
+You can set **`DATABASE_URL`** to a **Supabase** (or any external) PostgreSQL URI. You do **not** add a database component on DigitalOcean in that case.
+
+**Supabase: use the connection pooler.** From DigitalOcean App Platform, the direct DB (port 5432) is often unreachable (`EHOSTUNREACH`). Use the **pooler** URI instead:
+
+1. In Supabase: **Project Settings** → **Database**.
+2. Under **Connection string**, select **URI**.
+3. Use the **Session** or **Transaction** pooler connection string — it uses **port 6543** (not 5432). Copy that URI.
+4. Replace `[YOUR-PASSWORD]` with your database password.
+5. Set **`DATABASE_URL`** on your DigitalOcean app to this URI (and add `?sslmode=require` at the end if the URI doesn’t already include it).
+6. Redeploy.
+
+If you use the direct connection (port 5432), the app may fail to start with a connection error; switching to the pooler (6543) fixes it.
+
+---
+
 ## Summary
 
 | Goal                         | On App Platform |
