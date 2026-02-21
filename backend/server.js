@@ -134,8 +134,10 @@ app.get('/api/auth/me', async (req, res) => {
     let hasPassword = false;
     if (sessionUser?.email) {
       const db = await getDb();
-      const row = await db.queryOne('SELECT password_hash FROM users WHERE email = ?', [sessionUser.email]);
-      hasPassword = !!(row && row.password_hash);
+      // Case-insensitive email lookup (session may have different casing); pick() handles DB column casing (e.g. PostgreSQL)
+      const row = await db.queryOne('SELECT password_hash FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(?))', [sessionUser.email]);
+      const passwordHash = row ? pick(row, 'password_hash') : null;
+      hasPassword = !!(passwordHash != null && String(passwordHash).length > 0);
     }
     return res.json({
       ok: true,
@@ -152,7 +154,7 @@ app.post('/api/auth/login', async (req, res) => {
   if (!authEnabled) return res.json({ ok: true, authEnabled: false });
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
   const db = await getDb();
-  const userRow = await db.queryOne('SELECT id, email, name, password_hash FROM users WHERE email = ?', [email]);
+  const userRow = await db.queryOne('SELECT id, email, name, password_hash FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(?))', [email]);
   if (!userRow) {
     if (authPassword.length > 0 && password === authPassword) {
       req.session.authenticated = true;
@@ -160,7 +162,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
     return res.status(401).json({ error: 'Invalid email or password' });
   }
-  const passwordHash = userRow.password_hash;
+  const passwordHash = pick(userRow, 'password_hash');
   if (!passwordHash) return res.status(401).json({ error: 'This account uses Google sign-in. Use Log in with Google.' });
   const match = await bcrypt.compare(password, passwordHash);
   if (!match) return res.status(401).json({ error: 'Invalid email or password' });
@@ -196,12 +198,14 @@ app.post('/api/auth/change-password', async (req, res) => {
   if (newPassword.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters' });
   const db = await getDb();
   const email = req.session.user.email;
-  const row = await db.queryOne('SELECT id, password_hash FROM users WHERE email = ?', [email]);
-  if (!row || !row.password_hash) return res.status(400).json({ error: 'This account uses Google sign-in. Password cannot be changed.' });
-  const match = await bcrypt.compare(currentPassword, row.password_hash);
+  // Case-insensitive lookup; pick() handles DB column casing (e.g. PostgreSQL)
+  const row = await db.queryOne('SELECT id, password_hash FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(?))', [email]);
+  const passwordHash = row ? pick(row, 'password_hash') : null;
+  if (!row || !passwordHash) return res.status(400).json({ error: 'This account uses Google sign-in. Password cannot be changed.' });
+  const match = await bcrypt.compare(currentPassword, passwordHash);
   if (!match) return res.status(401).json({ error: 'Current password is incorrect' });
-  const passwordHash = await bcrypt.hash(newPassword, 10);
-  await db.run('UPDATE users SET password_hash = ? WHERE email = ?', [passwordHash, email]);
+  const newHash = await bcrypt.hash(newPassword, 10);
+  await db.run('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, row.id]);
   res.json({ ok: true });
 });
 
