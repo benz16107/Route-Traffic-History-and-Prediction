@@ -9,6 +9,7 @@ import { initDatabase, getDb } from './db/init.js';
 import { startJob, stopJob, pauseJob, resumeJob, restoreRunningJobs } from './services/scheduler.js';
 import { getRoutePolyline, reverseGeocode } from './services/googleMaps.js';
 import { mkdirSync, existsSync } from 'fs';
+import crypto from 'crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDir = join(__dirname, 'data');
@@ -17,7 +18,9 @@ if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 initDatabase();
 const app = express();
 const authPassword = process.env.AUTH_PASSWORD || '';
-const authEnabled = authPassword.length > 0;
+const googleClientId = process.env.GOOGLE_OAUTH_CLIENT_ID || '';
+const googleClientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET || '';
+const authEnabled = authPassword.length > 0 || googleClientId.length > 0;
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
@@ -72,10 +75,27 @@ function toJobResponse(row) {
   };
 }
 
-// ----- Auth (optional: set AUTH_PASSWORD in .env to require login) -----
+// ----- Auth (optional: AUTH_PASSWORD and/or Google OAuth) -----
+function isAuthenticated(req) {
+  return !!(req.session?.authenticated || req.session?.user);
+}
+
+app.get('/api/auth/config', (req, res) => {
+  res.json({
+    passwordAuth: authPassword.length > 0,
+    googleAuth: googleClientId.length > 0,
+  });
+});
+
 app.get('/api/auth/me', (req, res) => {
   if (!authEnabled) return res.json({ ok: true, authEnabled: false });
-  if (req.session?.authenticated) return res.json({ ok: true, authEnabled: true });
+  if (isAuthenticated(req)) {
+    return res.json({
+      ok: true,
+      authEnabled: true,
+      user: req.session?.user || null,
+    });
+  }
   res.status(401).json({ error: 'Not authenticated', authEnabled: true });
 });
 
@@ -92,11 +112,72 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+// Google OAuth: redirect user to Google
+app.get('/api/auth/google', (req, res) => {
+  if (!googleClientId.length) return res.status(501).json({ error: 'Google Sign-In not configured' });
+  const state = crypto.randomBytes(24).toString('hex');
+  req.session.googleOAuthState = state;
+  const backendUrl = process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
+  const redirectUri = `${backendUrl}/api/auth/google/callback`;
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: googleClientId,
+    redirect_uri: redirectUri,
+    scope: 'openid email profile',
+    state,
+  });
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+});
+
+// Google OAuth: callback – exchange code for tokens, fetch user, set session, redirect to app
+app.get('/api/auth/google/callback', async (req, res) => {
+  const { code, state } = req.query;
+  const frontendUrl = process.env.FRONTEND_URL || `${req.protocol}://${req.get('host')}`;
+  if (!code || !state || state !== req.session?.googleOAuthState) {
+    return res.redirect(`${frontendUrl}?auth_error=invalid_callback`);
+  }
+  delete req.session.googleOAuthState;
+  const backendUrl = process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
+  const redirectUri = `${backendUrl}/api/auth/google/callback`;
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code,
+      client_id: googleClientId,
+      client_secret: googleClientSecret,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    }),
+  });
+  if (!tokenRes.ok) {
+    const err = await tokenRes.text();
+    console.error('[Google OAuth] Token exchange failed:', err);
+    return res.redirect(`${frontendUrl}?auth_error=token_exchange`);
+  }
+  const tokens = await tokenRes.json();
+  const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+    headers: { Authorization: `Bearer ${tokens.access_token}` },
+  });
+  if (!userRes.ok) {
+    console.error('[Google OAuth] Userinfo failed');
+    return res.redirect(`${frontendUrl}?auth_error=userinfo`);
+  }
+  const user = await userRes.json();
+  req.session.authenticated = true;
+  req.session.user = {
+    email: user.email || null,
+    name: user.name || null,
+    picture: user.picture || null,
+  };
+  res.redirect(frontendUrl);
+});
+
 function requireAuth(req, res, next) {
   if (!req.path.startsWith('/api')) return next();
   if (req.path.startsWith('/api/auth')) return next();
   if (!authEnabled) return next();
-  if (req.session?.authenticated) return next();
+  if (isAuthenticated(req)) return next();
   res.status(401).json({ error: 'Not authenticated', authEnabled: true });
 }
 app.use(requireAuth);

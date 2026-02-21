@@ -79,13 +79,28 @@ Set billing alerts and quotas in [Google Cloud Console](https://console.cloud.go
 
 Auth is **optional**. By default the app has no login; anyone with the URL can use it.
 
-To require a password:
+You can enable one or both:
 
-1. Set **`AUTH_PASSWORD`** in `.env` to the password users must enter (e.g. `AUTH_PASSWORD=my_secret`).
-2. Restart the server. The app will show a sign-in page; only users who enter that password can access jobs and data.
-3. (Optional) Set **`AUTH_SECRET`** to a long random string for session signing; if unset, `AUTH_PASSWORD` is used.
+### Password (single shared password)
 
-Sessions last 7 days and use an HTTP-only cookie. To sign out, use **Sign out** in the header. If you leave `AUTH_PASSWORD` unset, the app behaves as before with no login.
+1. Set **`AUTH_PASSWORD`** in `.env` (e.g. `AUTH_PASSWORD=my_secret`).
+2. Restart the server. The sign-in page will show a password field.
+3. (Optional) Set **`AUTH_SECRET`** for session signing; if unset, `AUTH_PASSWORD` is used.
+
+### Google Sign-In (for public or multi-user use)
+
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an **OAuth 2.0 Client ID** (Application type: **Web application**).
+2. Under **Authorized redirect URIs**, add:
+   - Production: `https://your-domain.com/api/auth/google/callback`
+   - Local: `http://localhost:3001/api/auth/google/callback`
+3. In `.env` set **`GOOGLE_OAUTH_CLIENT_ID`** and **`GOOGLE_OAUTH_CLIENT_SECRET`** (from the OAuth client).
+4. Restart the server. The sign-in page will show **Sign in with Google**; after consent, users are signed in with their Google account (email shown in the header).
+
+If frontend and backend are on different hosts (e.g. Vercel + Railway), set **`BACKEND_URL`** and **`FRONTEND_URL`** so the OAuth callback and redirect work; set **`VITE_API_URL`** when building the frontend so the Google button points to your API.
+
+**Local testing with Google Sign-In:** Use the built app on one origin so the session cookie works: run `npm run build` then `node backend/server.js`, open `http://localhost:3001`, and add `http://localhost:3001/api/auth/google/callback` as a redirect URI in Google Console.
+
+Sessions last 7 days (HTTP-only cookie). Use **Sign out** in the header to log out. If neither `AUTH_PASSWORD` nor Google OAuth is configured, the app has no login.
 
 ## Build for production
 

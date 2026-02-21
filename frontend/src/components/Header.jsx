@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext'
 
 export default function Header({ view, onNavigate }) {
   const { theme, setTheme } = useTheme()
-  const { authEnabled, logout } = useAuth()
+  const { authEnabled, user, logout } = useAuth()
 
   return (
     <header className="site-header">
@@ -37,9 +37,16 @@ export default function Header({ view, onNavigate }) {
         </nav>
         <div className="header-actions">
           {authEnabled && (
-            <button type="button" className="header-link header-link-logout" onClick={logout}>
-              Sign out
-            </button>
+            <>
+              {user?.email && (
+                <span className="header-user-email" title={user.name || user.email}>
+                  {user.email}
+                </span>
+              )}
+              <button type="button" className="header-link header-link-logout" onClick={logout}>
+                Sign out
+              </button>
+            </>
           )}
           <div className="theme-toggle" role="group" aria-label="Theme">
             <button
