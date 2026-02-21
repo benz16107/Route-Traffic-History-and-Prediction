@@ -48,6 +48,7 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
   const [minMaxMode, setMinMaxMode] = useState('perDay') // 'off' | 'range' | 'perDay'
   const [showAllSnapshots, setShowAllSnapshots] = useState(false)
   const chartScrollRef = useRef(null)
+  const [chartContainerWidth, setChartContainerWidth] = useState(0)
   const [chartTooltip, setChartTooltip] = useState({ point: null, x: 0, y: 0 })
   const chartTooltipRafRef = useRef(null)
   const chartTooltipPendingRef = useRef(null)
@@ -182,9 +183,7 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
   const activeRange = CHART_RANGES.find(r => r.id === chartRange) || CHART_RANGES[0]
   const chartState = useMemo(() => {
     const now = Date.now()
-    const cutoff = activeRange.ms == null ? 0 : now - activeRange.ms
     const data = primarySnapshots
-      .filter(s => new Date(s.collected_at).getTime() >= cutoff)
       .map(s => ({
         ts: new Date(s.collected_at).getTime(),
         duration: s.duration_seconds != null ? Math.round(s.duration_seconds / 60) : null,
@@ -193,23 +192,25 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
     const scatter = data.filter(d => d.duration != null)
     const minTs = data.length > 0 ? data[0].ts : now
     const maxTs = data.length > 0 ? data[data.length - 1].ts : now
+    const totalSpan = maxTs - minTs
+    const viewportTimeMs = activeRange.ms != null ? activeRange.ms : (totalSpan || 24 * HOUR_MS)
     let ticks = []
-    if (data.length > 0 && chartRange !== 'all' && chartRange !== '30d') {
+    if (data.length > 0) {
+      const maxTicks = 80
+      let step
       if (chartRange === '7d') {
-        const d = new Date(minTs)
-        d.setHours(0, 0, 0, 0)
-        let t = d.getTime()
-        while (t <= maxTs + 1) {
-          ticks.push(t)
-          t += 6 * HOUR_MS
-        }
+        step = 6 * HOUR_MS
+      } else if (chartRange === '24h') {
+        step = HOUR_MS
       } else {
-        const start = Math.floor(minTs / HOUR_MS) * HOUR_MS
-        let t = start
-        while (t <= maxTs + 1) {
-          ticks.push(t)
-          t += HOUR_MS
-        }
+        step = 24 * HOUR_MS
+      }
+      let t = chartRange === '7d' ? (() => { const d = new Date(minTs); d.setHours(0, 0, 0, 0); return d.getTime() })() : Math.floor(minTs / step) * step
+      const rawCount = Math.ceil((maxTs - minTs) / step) + 1
+      if (rawCount > maxTicks) step = totalSpan / maxTicks
+      while (t <= maxTs + 1) {
+        ticks.push(t)
+        t += step
       }
     }
     const durations = data.map(d => d.duration).filter(v => v != null)
@@ -223,6 +224,7 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
       scatterData: scatter,
       chartMinTs: minTs,
       chartMaxTs: maxTs,
+      viewportTimeMs,
       xAxisTicks: ticks,
       averageDuration: avg,
       minDurationInRange: minD,
@@ -237,6 +239,7 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
     scatterData,
     chartMinTs,
     chartMaxTs,
+    viewportTimeMs,
     xAxisTicks,
     averageDuration,
     minDurationInRange,
@@ -314,6 +317,23 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
     }
     return bands
   }, [chartMinTs, chartMaxTs])
+
+  const totalTimeMs = chartMaxTs - chartMinTs
+  const chartInnerWidth = useMemo(() => {
+    if (chartContainerWidth <= 0 || totalTimeMs <= 0 || viewportTimeMs <= 0) return null
+    return Math.max(chartContainerWidth, Math.ceil((chartContainerWidth * totalTimeMs) / viewportTimeMs))
+  }, [chartContainerWidth, totalTimeMs, viewportTimeMs])
+
+  useEffect(() => {
+    const el = chartScrollRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => {
+      if (el) setChartContainerWidth(el.clientWidth)
+    })
+    ro.observe(el)
+    setChartContainerWidth(el.clientWidth)
+    return () => ro.disconnect()
+  }, [chartData.length])
 
   const handleChartMouseMove = useCallback(
     (e) => {
@@ -547,8 +567,11 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
                   onMouseMove={handleChartMouseMove}
                   onMouseLeave={handleChartMouseLeave}
                 >
-                  <div className="job-chart-inner">
-                    <ResponsiveContainer width="100%" height={180}>
+                  <div
+                    className="job-chart-inner"
+                    style={{ width: chartInnerWidth ?? '100%', minWidth: '100%' }}
+                  >
+                    <ResponsiveContainer width={chartInnerWidth ?? '100%'} height={180}>
                       <ScatterChart
                         data={scatterData}
                         margin={{ top: 4, right: CHART_MARGIN_RIGHT, left: 0, bottom: 4 }}
@@ -683,7 +706,7 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
                   )}
                   {averageDuration != null && (
                     <div className="job-chart-side-item job-chart-side-avg">
-                      <span className="job-chart-side-label">Avg ({activeRange.label})</span>
+                      <span className="job-chart-side-label">Avg (all)</span>
                       <span className="job-chart-side-value">{averageDuration.toFixed(1)} min</span>
                     </div>
                   )}
