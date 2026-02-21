@@ -99,6 +99,18 @@ function pick(row, ...possibleKeys) {
   return null;
 }
 
+// Normalize user for session/API: trim name and email, empty string → null (fixes DB/PostgreSQL casing and stray spaces)
+function normalizeUser(user) {
+  if (!user || typeof user !== 'object') return user;
+  const email = (pick(user, 'email') ?? user.email ?? '').toString().trim().toLowerCase();
+  const name = (pick(user, 'name') ?? user.name ?? '').toString().trim();
+  return {
+    ...user,
+    email: email || null,
+    name: name || null,
+  };
+}
+
 // Normalize job so frontend always gets name, start_name, end_name with correct keys; omit user_id from response
 function toJobResponse(row) {
   if (!row) return row;
@@ -139,10 +151,11 @@ app.get('/api/auth/me', async (req, res) => {
       const passwordHash = row ? pick(row, 'password_hash') : null;
       hasPassword = !!(passwordHash != null && String(passwordHash).length > 0);
     }
+    const outUser = sessionUser ? normalizeUser({ ...sessionUser, hasPassword }) : null;
     return res.json({
       ok: true,
       authEnabled: true,
-      user: sessionUser ? { ...sessionUser, hasPassword } : null,
+      user: outUser,
     });
   }
   res.status(401).json({ error: 'Not authenticated', authEnabled: true });
@@ -167,7 +180,8 @@ app.post('/api/auth/login', async (req, res) => {
   const match = await bcrypt.compare(password, passwordHash);
   if (!match) return res.status(401).json({ error: 'Invalid email or password' });
   req.session.authenticated = true;
-  req.session.user = { email: userRow.email, name: userRow.name || null, picture: null };
+  const sessionUser = { email: pick(userRow, 'email') ?? userRow.email, name: pick(userRow, 'name') ?? userRow.name ?? null, picture: null };
+  req.session.user = normalizeUser(sessionUser);
   res.json({ ok: true, authEnabled: true, user: req.session.user });
 });
 
@@ -185,7 +199,7 @@ app.post('/api/auth/register', async (req, res) => {
   const passwordHash = await bcrypt.hash(password, 10);
   await db.run('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)', [id, email, name || null, passwordHash]);
   req.session.authenticated = true;
-  req.session.user = { email, name: name || null, picture: null };
+  req.session.user = normalizeUser({ email, name: name || null, picture: null });
   res.status(201).json({ ok: true, authEnabled: true, user: req.session.user });
 });
 
@@ -206,7 +220,9 @@ app.post('/api/auth/change-password', async (req, res) => {
   if (!match) return res.status(401).json({ error: 'Current password is incorrect' });
   const newHash = await bcrypt.hash(newPassword, 10);
   await db.run('UPDATE users SET password_hash = ? WHERE id = ?', [newHash, row.id]);
-  res.json({ ok: true });
+  // Return updated user so frontend can keep hasPassword: true without refetch timing issues
+  const updated = normalizeUser({ ...req.session.user, hasPassword: true });
+  res.json({ ok: true, user: updated });
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -268,54 +284,72 @@ function getFrontendUrl(req) {
 
 // Google OAuth: callback – exchange code for tokens, fetch user, set session, redirect to app
 app.get('/api/auth/google/callback', async (req, res) => {
-  const { code, state: signedState } = req.query;
   const frontendUrl = getFrontendUrl(req);
-  if (!code || !signedState || !verifyState(signedState)) {
-    return res.redirect(`${frontendUrl}?auth_error=invalid_callback`);
+  const safeRedirect = (errParam) => res.redirect(`${frontendUrl}?auth_error=${errParam}`);
+
+  try {
+    const { code, state: signedState } = req.query;
+    if (!code || !signedState || !verifyState(signedState)) {
+      return safeRedirect('invalid_callback');
+    }
+    const backendUrl = process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
+    const redirectUri = `${backendUrl}/api/auth/google/callback`;
+    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: googleClientId,
+        client_secret: googleClientSecret,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+      }),
+    });
+    if (!tokenRes.ok) {
+      const err = await tokenRes.text();
+      console.error('[Google OAuth] Token exchange failed:', err);
+      return safeRedirect('token_exchange');
+    }
+    const tokens = await tokenRes.json();
+    const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    if (!userRes.ok) {
+      console.error('[Google OAuth] Userinfo failed');
+      return safeRedirect('userinfo');
+    }
+    const user = await userRes.json();
+    const email = (user?.email || '').toString().trim().toLowerCase();
+    if (!email) return safeRedirect('userinfo');
+
+    const db = await getDb();
+    // Case-insensitive lookup so we find existing account (e.g. manual signup with same email)
+    let userRow = await db.queryOne('SELECT id, email, name FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(?))', [email]);
+    if (!userRow) {
+      const id = uuidv4();
+      const googleName = (user.name || '').toString().trim() || null;
+      await db.run('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, NULL)', [id, email, googleName]);
+      userRow = await db.queryOne('SELECT id, email, name FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM(?))', [email]);
+    }
+    if (!userRow) {
+      console.error('[Google OAuth] Could not load or create user for email');
+      return safeRedirect('userinfo');
+    }
+
+    const dbName = pick(userRow, 'name') ?? userRow.name;
+    const dbEmail = pick(userRow, 'email') ?? userRow.email;
+    const sessionUser = normalizeUser({
+      email: (dbEmail != null && String(dbEmail).trim() !== '') ? String(dbEmail).trim().toLowerCase() : email,
+      name: (dbName != null && String(dbName).trim() !== '') ? String(dbName).trim() : ((user.name || '').toString().trim() || null),
+      picture: (user.picture && typeof user.picture === 'string') ? user.picture : null,
+    });
+    req.session.authenticated = true;
+    req.session.user = sessionUser;
+    return res.redirect(frontendUrl);
+  } catch (err) {
+    console.error('[Google OAuth] Callback error:', err);
+    return safeRedirect('callback_error');
   }
-  const backendUrl = process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
-  const redirectUri = `${backendUrl}/api/auth/google/callback`;
-  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      code,
-      client_id: googleClientId,
-      client_secret: googleClientSecret,
-      redirect_uri: redirectUri,
-      grant_type: 'authorization_code',
-    }),
-  });
-  if (!tokenRes.ok) {
-    const err = await tokenRes.text();
-    console.error('[Google OAuth] Token exchange failed:', err);
-    return res.redirect(`${frontendUrl}?auth_error=token_exchange`);
-  }
-  const tokens = await tokenRes.json();
-  const userRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-    headers: { Authorization: `Bearer ${tokens.access_token}` },
-  });
-  if (!userRes.ok) {
-    console.error('[Google OAuth] Userinfo failed');
-    return res.redirect(`${frontendUrl}?auth_error=userinfo`);
-  }
-  const user = await userRes.json();
-  const email = (user.email || '').trim().toLowerCase();
-  if (!email) return res.redirect(`${frontendUrl}?auth_error=userinfo`);
-  const db = await getDb();
-  let userRow = await db.queryOne('SELECT id, email, name FROM users WHERE email = ?', [email]);
-  if (!userRow) {
-    const id = uuidv4();
-    await db.run('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, NULL)', [id, email, (user.name || '').trim() || null]);
-    userRow = await db.queryOne('SELECT id, email, name FROM users WHERE email = ?', [email]);
-  }
-  req.session.authenticated = true;
-  req.session.user = {
-    email: userRow.email,
-    name: userRow.name || user.name || null,
-    picture: user.picture || null,
-  };
-  res.redirect(frontendUrl);
 });
 
 function requireAuth(req, res, next) {

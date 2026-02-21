@@ -5,7 +5,7 @@ import { fetchJson } from '../utils/api.js'
 const API = '/api'
 
 export default function ProfilePage({ onBack }) {
-  const { user } = useAuth()
+  const { user, checkAuth, setUserFromResponse } = useAuth()
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -27,7 +27,7 @@ export default function ProfilePage({ onBack }) {
     }
     setSubmitting(true)
     try {
-      await fetchJson(`${API}/auth/change-password`, {
+      const data = await fetchJson(`${API}/auth/change-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -39,6 +39,8 @@ export default function ProfilePage({ onBack }) {
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
+      if (data?.user) setUserFromResponse(data.user)
+      else await checkAuth()
     } catch (err) {
       setError(err?.message || 'Failed to change password.')
     } finally {
@@ -75,55 +77,65 @@ export default function ProfilePage({ onBack }) {
         {canChangePassword && (
           <section className="profile-section profile-section-password">
             <h2 className="profile-section-title">Change password</h2>
-            {message && <p className="profile-message" role="status">{message}</p>}
-            {error && <p className="profile-error" role="alert">{error}</p>}
-            <form onSubmit={handleChangePassword} className="profile-form">
-              <label htmlFor="profile-current-password" className="auth-label">
-                Current password
-              </label>
-              <input
-                id="profile-current-password"
-                type="password"
-                className="auth-input"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                autoComplete="current-password"
-                disabled={submitting}
-                required
-              />
-              <label htmlFor="profile-new-password" className="auth-label">
-                New password
-              </label>
-              <input
-                id="profile-new-password"
-                type="password"
-                className="auth-input"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                autoComplete="new-password"
-                disabled={submitting}
-                minLength={8}
-                required
-              />
-              <label htmlFor="profile-confirm-password" className="auth-label">
-                Confirm new password
-              </label>
-              <input
-                id="profile-confirm-password"
-                type="password"
-                className="auth-input"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                autoComplete="new-password"
-                disabled={submitting}
-                minLength={8}
-                required
-              />
-              <p className="auth-hint">At least 8 characters</p>
-              <button type="submit" className="btn btn-primary" disabled={submitting}>
-                {submitting ? 'Updating…' : 'Update password'}
-              </button>
-            </form>
+            <div className="profile-password-box">
+              {message && <p className="profile-message" role="status">{message}</p>}
+              {error && <p className="profile-error" role="alert">{error}</p>}
+              <form onSubmit={handleChangePassword} className="profile-form">
+                <div className="profile-form-group">
+                  <label htmlFor="profile-current-password" className="auth-label">
+                    Current password
+                  </label>
+                  <input
+                    id="profile-current-password"
+                    type="password"
+                    className="auth-input"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    autoComplete="current-password"
+                    disabled={submitting}
+                    required
+                  />
+                </div>
+                <div className="profile-form-group">
+                  <label htmlFor="profile-new-password" className="auth-label">
+                    New password
+                  </label>
+                  <input
+                    id="profile-new-password"
+                    type="password"
+                    className="auth-input"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    autoComplete="new-password"
+                    disabled={submitting}
+                    minLength={8}
+                    required
+                  />
+                  <p className="auth-hint">At least 8 characters</p>
+                </div>
+                <div className="profile-form-group">
+                  <label htmlFor="profile-confirm-password" className="auth-label">
+                    Confirm new password
+                  </label>
+                  <input
+                    id="profile-confirm-password"
+                    type="password"
+                    className="auth-input"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    autoComplete="new-password"
+                    disabled={submitting}
+                    minLength={8}
+                    required
+                  />
+                </div>
+                <div className="profile-form-actions">
+                  <button type="submit" className="btn btn-primary" disabled={submitting}>
+                    {submitting ? 'Updating…' : 'Update password'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </section>
         )}
 

@@ -102,8 +102,14 @@ export function AuthProvider({ children }) {
 
   const googleSignInUrl = `${import.meta.env.VITE_API_URL || ''}/api/auth/google`
 
+  const setUserFromResponse = useCallback((userFromApi) => {
+    if (userFromApi && typeof userFromApi === 'object') {
+      setUser((prev) => (prev ? { ...prev, ...userFromApi } : userFromApi))
+    }
+  }, [])
+
   return (
-    <AuthContext.Provider value={{ isAuthenticated, authEnabled, authConfig, user, loading, login, register, logout, checkAuth, googleSignInUrl }}>
+    <AuthContext.Provider value={{ isAuthenticated, authEnabled, authConfig, user, loading, login, register, logout, checkAuth, setUserFromResponse, googleSignInUrl }}>
       {children}
     </AuthContext.Provider>
   )

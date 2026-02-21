@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "node backend/server.js",
-    "dev:frontend": "cd frontend && npm run dev",
+    "dev:frontend": "wait-on http://localhost:3001 -t 30000 && cd frontend && npm run dev",
     "build": "cd frontend && npm install --include=dev && npx vite build",
     "db:init": "node backend/db/init.js",
     "test:apis": "node scripts/test-apis.js"
@@ -25,6 +25,7 @@
     "uuid": "^10.0.0"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "concurrently": "^9.1.0",
+    "wait-on": "^8.0.5"
   }
 }

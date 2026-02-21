@@ -12,8 +12,9 @@ export default function SignUpPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const authError = params.get('auth_error')
+    if (authError === 'callback_error') setError('Something went wrong during sign-in. Try again or sign up with email.')
+    else if (authError) setError('Sign-in was cancelled or invalid. Try again.')
     if (authError) {
-      setError('Sign-in was cancelled or invalid. Try again.')
       window.history.replaceState({}, '', window.location.pathname)
     }
   }, [])

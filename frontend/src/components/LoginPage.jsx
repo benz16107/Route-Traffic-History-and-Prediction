@@ -13,6 +13,7 @@ export default function LoginPage() {
     const authError = params.get('auth_error')
     if (authError === 'invalid_callback') setError('Sign-in was cancelled or invalid. Try again.')
     else if (authError === 'token_exchange' || authError === 'userinfo') setError('Google Sign-In failed. Try again or use email and password.')
+    else if (authError === 'callback_error') setError('Something went wrong during sign-in. Try again or use email and password.')
     if (authError) {
       window.history.replaceState({}, '', window.location.pathname)
     }

@@ -47,14 +47,14 @@ export default function Header({ view, onNavigate }) {
         <div className="header-actions">
           {authEnabled && (
             <>
-              {user?.email && (
+              {user && (
                 <button
                   type="button"
-                  className="header-user-email"
+                  className="header-user-name"
                   onClick={() => onNavigate('profile')}
-                  title={user.name ? `${user.name} (${user.email})` : user.email}
+                  title={user.email ? `${user.name || 'Profile'} (${user.email})` : (user.name || 'Profile')}
                 >
-                  {user.email}
+                  {user.name?.trim() || 'Profile'}
                 </button>
               )}
               <button type="button" className="btn btn-sm btn-ghost header-logout-btn" onClick={logout} title="Log out">
