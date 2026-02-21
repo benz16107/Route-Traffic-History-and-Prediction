@@ -4,6 +4,8 @@ import Dashboard from './components/Dashboard'
 import JobsList from './components/JobsList'
 import RouteWizard from './components/RouteWizard'
 import JobDetail from './components/JobDetail'
+import LoginPage from './components/LoginPage'
+import { useAuth } from './context/AuthContext'
 import './App.css'
 
 function pathToState(pathname) {
@@ -98,6 +100,21 @@ class AppErrorBoundary extends React.Component {
 }
 
 export default function App() {
+  const { isAuthenticated, loading } = useAuth()
+  if (loading) {
+    return (
+      <div className="app auth-loading">
+        <span className="loading-text">Loading…</span>
+      </div>
+    )
+  }
+  if (!isAuthenticated) {
+    return (
+      <div className="app">
+        <LoginPage />
+      </div>
+    )
+  }
   return (
     <div className="app">
       <AppErrorBoundary>

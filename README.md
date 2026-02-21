@@ -44,6 +44,7 @@ cp .env.example .env
 # Edit .env and set:
 # GOOGLE_MAPS_API_KEY  - backend (Directions API)
 # VITE_GOOGLE_MAPS_API_KEY - frontend (Places + Maps), if using a separate key
+# AUTH_PASSWORD - optional; set to require a password to use the app (see Authentication below)
 ```
 
 ### 4. Initialize database
@@ -73,6 +74,18 @@ Google Maps APIs (Directions, Geocoding, Places) are billed per request. This ap
 - **Place autocomplete** — Requests only after 3 characters and 400 ms debounce to limit Places API calls.
 
 Set billing alerts and quotas in [Google Cloud Console](https://console.cloud.google.com/billing) to avoid surprises.
+
+## Authentication
+
+Auth is **optional**. By default the app has no login; anyone with the URL can use it.
+
+To require a password:
+
+1. Set **`AUTH_PASSWORD`** in `.env` to the password users must enter (e.g. `AUTH_PASSWORD=my_secret`).
+2. Restart the server. The app will show a sign-in page; only users who enter that password can access jobs and data.
+3. (Optional) Set **`AUTH_SECRET`** to a long random string for session signing; if unset, `AUTH_PASSWORD` is used.
+
+Sessions last 7 days and use an HTTP-only cookie. To sign out, use **Sign out** in the header. If you leave `AUTH_PASSWORD` unset, the app behaves as before with no login.
 
 ## Build for production
 
@@ -140,14 +153,10 @@ npm run build
   - **Frontend key:** HTTP referrer restriction to your public URL(s), e.g. `https://your-app.up.railway.app/*`; APIs: “Maps JavaScript API”, “Places API”.
 - Set **billing alerts** and optional quotas so you don’t get unexpected charges.
 
-### 6. Security note (no auth)
+### 6. Auth and security
 
-The app has **no login or user accounts**. Anyone who can open your deployed URL can create, edit, pause, and delete jobs and see all data. That’s fine for:
-
-- Personal use (only you have the link), or  
-- A small, trusted group.
-
-If you expose it broadly, consider adding authentication (e.g. a simple password or OAuth) and rate limiting so only intended users can use it and so your Google API key isn’t abused.
+- **With auth:** Set `AUTH_PASSWORD` (and optionally `AUTH_SECRET`) on the host. Only users who sign in with that password can use the app.
+- **Without auth:** Leave `AUTH_PASSWORD` unset for open access (fine for personal or trusted use). If you expose the URL broadly, enable auth and consider rate limiting to protect your Google API key.
 
 ### Quick checklist
 
@@ -155,7 +164,7 @@ If you expose it broadly, consider adding authentication (e.g. a simple password
 - [ ] Set `GOOGLE_MAPS_API_KEY` and `VITE_GOOGLE_MAPS_API_KEY` (and build with the latter if needed).
 - [ ] Attach a persistent volume for `backend/data` (or equivalent) so the DB is not lost.
 - [ ] Restrict Google API keys (referrer for frontend, IP/API for backend) and set billing alerts.
-- [ ] (Optional) Add auth if the site is public and you want to limit who can use it.
+- [ ] (Optional) Set `AUTH_PASSWORD` on the host to require login.
 
 ## Project structure
 

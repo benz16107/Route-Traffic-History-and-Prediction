@@ -23,7 +23,6 @@ const DAY_MS = 24 * HOUR_MS
 const CHART_RANGES = [
   { id: '24h', label: '24 hours', ms: 24 * HOUR_MS, timeOnly: true },
   { id: '7d', label: '7 days', ms: 7 * 24 * HOUR_MS, timeOnly: false },
-  { id: '30d', label: '30 days', ms: 30 * 24 * HOUR_MS, timeOnly: false },
   { id: 'all', label: 'All', ms: null, timeOnly: false },
 ]
 
@@ -43,15 +42,18 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
   const [editing, setEditing] = useState(false)
   const [expandedSnapshotId, setExpandedSnapshotId] = useState(null)
   const [countdown, setCountdown] = useState(null)
-  const [chartRange, setChartRange] = useState('24h')
+  const [chartRange, setChartRange] = useState('7d')
+  const [chartViewportMs, setChartViewportMs] = useState(7 * DAY_MS)
   const [showAverageLine, setShowAverageLine] = useState(true)
   const [minMaxMode, setMinMaxMode] = useState('perDay') // 'off' | 'range' | 'perDay'
   const [showAllSnapshots, setShowAllSnapshots] = useState(false)
   const chartScrollRef = useRef(null)
   const [chartContainerWidth, setChartContainerWidth] = useState(0)
   const [chartTooltip, setChartTooltip] = useState({ point: null, x: 0, y: 0 })
-  const chartTooltipRafRef = useRef(null)
-  const chartTooltipPendingRef = useRef(null)
+  const [chartTooltipPinned, setChartTooltipPinned] = useState(null)
+  const [chartPopupSnapshot, setChartPopupSnapshot] = useState(null)
+  const chartHoverPointRef = useRef(null) // avoid setState when same point stays highlighted
+  const chartDragRef = useRef({ isDown: false, startX: 0, startScrollLeft: 0, didDrag: false })
 
   const fetchData = async () => {
     try {
@@ -168,8 +170,34 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
     (d) => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
     []
   )
+  const formatDurationMin = (v) => (v % 1 === 0 ? String(v) : v.toFixed(1))
 
   const activeRange = CHART_RANGES.find(r => r.id === chartRange) || CHART_RANGES[0]
+
+  const totalSpanMs =
+    primarySnapshots.length >= 2
+      ? Math.max(...primarySnapshots.map((s) => new Date(s.collected_at).getTime())) -
+        Math.min(...primarySnapshots.map((s) => new Date(s.collected_at).getTime()))
+      : 7 * DAY_MS
+
+  const setChartRangeAndViewport = useCallback(
+    (rangeId) => {
+      setChartRange(rangeId)
+      const range = CHART_RANGES.find((r) => r.id === rangeId) || CHART_RANGES[0]
+      setChartViewportMs(range.ms != null ? range.ms : totalSpanMs)
+    },
+    [totalSpanMs]
+  )
+
+  const VIEWPORT_MATCH_TOLERANCE_MS = 2000
+  const rangeViewportMatches = useCallback(
+    (r) => {
+      const presetMs = r.ms != null ? r.ms : totalSpanMs
+      return Math.abs(chartViewportMs - presetMs) < VIEWPORT_MATCH_TOLERANCE_MS
+    },
+    [chartViewportMs, totalSpanMs]
+  )
+
   const chartState = useMemo(() => {
     const now = Date.now()
     const data = primarySnapshots
@@ -182,7 +210,8 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
     const minTs = data.length > 0 ? data[0].ts : now
     const maxTs = data.length > 0 ? data[data.length - 1].ts : now
     const totalSpan = maxTs - minTs
-    const viewportTimeMs = activeRange.ms != null ? activeRange.ms : (totalSpan || 24 * HOUR_MS)
+    const baseViewport = totalSpan || 24 * HOUR_MS
+    const viewportTimeMs = Math.max(24 * HOUR_MS, Math.min(chartViewportMs, baseViewport))
     let ticks = []
     if (data.length > 0) {
       const maxTicks = 80
@@ -208,6 +237,12 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
     const maxD = durations.length > 0 ? Math.max(...durations) : null
     const minPoints = minD != null ? data.filter(d => d.duration === minD) : []
     const maxPoints = maxD != null ? data.filter(d => d.duration === maxD) : []
+    const range = minD != null && maxD != null ? maxD - minD : 0
+    const padding = range > 0 ? Math.max(range * 0.15, 2) : 5
+    const chartYDomain =
+      minD != null && maxD != null
+        ? [Math.floor(minD - padding), Math.ceil(maxD + padding)]
+        : [0, 60]
     return {
       chartData: data,
       scatterData: scatter,
@@ -220,8 +255,9 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
       maxDurationInRange: maxD,
       minPoints,
       maxPoints,
+      chartYDomain,
     }
-  }, [primarySnapshots, chartRange])
+  }, [primarySnapshots, chartRange, chartViewportMs])
 
   const {
     chartData,
@@ -235,6 +271,7 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
     maxDurationInRange,
     minPoints,
     maxPoints,
+    chartYDomain,
   } = chartState
 
   const perDayMinMaxPoints = useMemo(() => {
@@ -270,16 +307,17 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
         : formatTime(new Date(ts).toISOString()),
     [activeRange.timeOnly, formatTime]
   )
+  const handleChartZoomIn = useCallback(() => {
+    setChartViewportMs((prev) => Math.max(24 * HOUR_MS, prev / 1.25))
+  }, [])
+
+  const handleChartZoomOut = useCallback(() => {
+    setChartViewportMs((prev) => Math.min(totalSpanMs, prev * 1.25))
+  }, [totalSpanMs])
+
   const formatXAxisTick = useCallback(
-    (ts) => {
-      if (chartRange === '7d') {
-        const d = new Date(ts)
-        const day = d.toLocaleDateString(undefined, { weekday: 'short' })
-        const time = d.toLocaleTimeString(undefined, { hour: 'numeric' })
-        return `${day} ${time}`
-      }
-      return new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric' })
-    },
+    (ts) =>
+      chartRange === 'all' ? '' : new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric' }),
     [chartRange]
   )
 
@@ -343,60 +381,112 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
   }, [job?.id, snapshots.length, chartRange, chartInnerWidth])
 
   const SCROLLBAR_HIT_PX = 12
+  const CHART_HEIGHT = 280
+  const CHART_PLOT_TOP = 4
+  const CHART_PLOT_BOTTOM = 4
+  const CHART_PLOT_LEFT = 28 // YAxis width - plot area starts after this
+  const CHART_PLOT_HEIGHT = CHART_HEIGHT - CHART_PLOT_TOP - CHART_PLOT_BOTTOM
+  const HOVER_ON_POINT_RADIUS_PX = 8 // only highlight when cursor is right on the dot (small radius)
 
   const handleChartMouseMove = useCallback(
     (e) => {
       const el = chartScrollRef.current
-      if (!el || !scatterData.length) return
-      const rect = el.getBoundingClientRect()
-      if (e.clientY >= rect.bottom - SCROLLBAR_HIT_PX) {
-        if (chartTooltipRafRef.current != null) {
-          cancelAnimationFrame(chartTooltipRafRef.current)
-          chartTooltipRafRef.current = null
-        }
-        chartTooltipPendingRef.current = null
-        setChartTooltip((prev) => (prev.point ? { point: null, x: 0, y: 0 } : prev))
+      if (!el) return
+      const ref = chartDragRef.current
+      if (ref.isDown) {
+        el.scrollLeft = ref.startScrollLeft + (ref.startX - e.clientX)
+        ref.didDrag = true
         return
       }
-      const plotWidth = el.scrollWidth - CHART_MARGIN_RIGHT
+      if (!scatterData.length) return
+      const rect = el.getBoundingClientRect()
+      if (e.clientY >= rect.bottom - SCROLLBAR_HIT_PX) {
+        if (chartHoverPointRef.current !== null) {
+          chartHoverPointRef.current = null
+          setChartTooltip({ point: null, x: 0, y: 0 })
+        }
+        return
+      }
+      const plotWidth = el.scrollWidth - CHART_MARGIN_RIGHT - CHART_PLOT_LEFT
       if (plotWidth <= 0) return
-      const plotX = Math.max(0, Math.min(plotWidth, el.scrollLeft + (e.clientX - rect.left)))
-      const ratio = plotX / plotWidth
-      const cursorTime = chartMinTs + ratio * (chartMaxTs - chartMinTs)
-      let point = scatterData[0]
-      let minDist = Infinity
+      const timeRange = chartMaxTs - chartMinTs
+      const [yMin, yMax] = chartYDomain
+      const durationRange = yMax - yMin
+      const cursorX = el.scrollLeft + (e.clientX - rect.left)
+      const cursorY = e.clientY - rect.top
+      const maxDistSq = HOVER_ON_POINT_RADIUS_PX * HOVER_ON_POINT_RADIUS_PX
+      let best = null
+      let bestDistSq = maxDistSq + 1
       for (let i = 0; i < scatterData.length; i++) {
         const d = scatterData[i]
-        const dist = Math.abs(d.ts - cursorTime)
-        if (dist < minDist) {
-          minDist = dist
-          point = d
+        const pointX =
+          CHART_PLOT_LEFT +
+          (timeRange > 0 ? ((d.ts - chartMinTs) / timeRange) * plotWidth : 0)
+        const pointY =
+          CHART_PLOT_TOP +
+          (durationRange > 0 ? (1 - (d.duration - yMin) / durationRange) * CHART_PLOT_HEIGHT : 0)
+        const distSq = (cursorX - pointX) ** 2 + (cursorY - pointY) ** 2
+        if (distSq <= maxDistSq && distSq < bestDistSq) {
+          bestDistSq = distSq
+          best = d
         }
       }
-      const next = { point, x: e.clientX - 12, y: e.clientY }
-      chartTooltipPendingRef.current = next
-      if (chartTooltipRafRef.current == null) {
-        chartTooltipRafRef.current = requestAnimationFrame(() => {
-          chartTooltipRafRef.current = null
-          if (chartTooltipPendingRef.current) {
-            setChartTooltip(chartTooltipPendingRef.current)
-          }
-        })
-      }
+      if (chartHoverPointRef.current?.ts === best?.ts) return
+      chartHoverPointRef.current = best ?? null
+      setChartTooltip(
+        best
+          ? { point: best, x: e.clientX - 12, y: e.clientY }
+          : { point: null, x: 0, y: 0 }
+      )
     },
-    [scatterData, chartMinTs, chartMaxTs]
+    [scatterData, chartMinTs, chartMaxTs, chartYDomain]
   )
 
   const handleChartMouseLeave = useCallback(() => {
-    if (chartTooltipRafRef.current != null) {
-      cancelAnimationFrame(chartTooltipRafRef.current)
-      chartTooltipRafRef.current = null
+    chartDragRef.current.isDown = false
+    if (chartHoverPointRef.current !== null) {
+      chartHoverPointRef.current = null
+      setChartTooltip({ point: null, x: 0, y: 0 })
     }
-    chartTooltipPendingRef.current = null
-    setChartTooltip({ point: null, x: 0, y: 0 })
   }, [])
 
+  const handleChartMouseDown = useCallback((e) => {
+    const el = chartScrollRef.current
+    if (!el) return
+    chartDragRef.current = {
+      isDown: true,
+      startX: e.clientX,
+      startScrollLeft: el.scrollLeft,
+      didDrag: false,
+    }
+  }, [])
+
+  const handleChartMouseUp = useCallback(() => {
+    chartDragRef.current.isDown = false
+  }, [])
+
+  const handleChartClick = useCallback(() => {
+    if (chartDragRef.current.didDrag) {
+      chartDragRef.current.didDrag = false
+      return
+    }
+    if (!chartTooltip.point) {
+      setChartTooltipPinned(null)
+      return
+    }
+    setChartTooltipPinned({ point: chartTooltip.point, x: chartTooltip.x, y: chartTooltip.y })
+    const snap = primarySnapshots.find(
+      (s) => new Date(s.collected_at).getTime() === chartTooltip.point.ts
+    )
+    if (snap) setChartPopupSnapshot(snap)
+  }, [chartTooltip.point, chartTooltip.x, chartTooltip.y, primarySnapshots])
+
   const latestSnap = primarySnapshots[primarySnapshots.length - 1]
+
+  const getSnapshotForPoint = useCallback(
+    (point) => primarySnapshots.find((s) => new Date(s.collected_at).getTime() === point.ts) ?? null,
+    [primarySnapshots]
+  )
 
   const ActionBtn = ({ onClick, children, variant = 'secondary', disabled }) => (
     <button type="button" className={`btn btn-sm btn-${variant}`} onClick={onClick} disabled={disabled}>{children}</button>
@@ -472,7 +562,7 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
         </div>
         <div className="route-hero-live">
           <div className="route-hero-live-item">
-            <span className="route-hero-live-label">Latest</span>
+            <span className="route-hero-live-label">Current</span>
             <span className="route-hero-live-value">
               {latestSnap?.duration_seconds ? `${Math.round(latestSnap.duration_seconds / 60)} min` : '—'}
             </span>
@@ -483,7 +573,11 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
           {job.status === 'running' && countdown != null && (
             <div className="route-hero-live-item route-hero-live-next">
               <span className="route-hero-live-label">Next in</span>
-              <span className="route-hero-live-value">{countdown}s</span>
+              <span className="route-hero-live-value">
+                {countdown >= 60
+                  ? `${Math.floor(countdown / 60)}m ${countdown % 60}s`
+                  : `${countdown}s`}
+              </span>
             </div>
           )}
         </div>
@@ -512,12 +606,6 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
               {maxDuration != null ? `${Math.round(maxDuration / 60)} min` : '—'}
             </span>
           </div>
-          <div className="route-metric">
-            <span className="route-metric-label">Average</span>
-            <span className="route-metric-value">
-              {totalAvgDuration != null ? `${Math.round(totalAvgDuration / 60)} min` : '—'}
-            </span>
-          </div>
         </section>
       )}
 
@@ -533,12 +621,32 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
                   <button
                     key={r.id}
                     type="button"
-                    className={`btn btn-sm ${chartRange === r.id ? 'btn-primary' : 'btn-ghost'}`}
-                    onClick={() => setChartRange(r.id)}
+                    className={`btn btn-sm ${chartRange === r.id && rangeViewportMatches(r) ? 'btn-primary' : 'btn-ghost'}`}
+                    onClick={() => setChartRangeAndViewport(r.id)}
                   >
                     {r.label}
                   </button>
                 ))}
+              </div>
+              <div className="job-chart-zoom" role="group" aria-label="Chart zoom">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm job-chart-zoom-btn"
+                  onClick={handleChartZoomIn}
+                  title="Zoom in"
+                  aria-label="Zoom in"
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm job-chart-zoom-btn"
+                  onClick={handleChartZoomOut}
+                  title="Zoom out"
+                  aria-label="Zoom out"
+                >
+                  −
+                </button>
               </div>
               {chartData.length > 0 && (
                 <>
@@ -585,22 +693,26 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
               <div className="job-chart-wrap">
                 <div
                   ref={chartScrollRef}
-                  className="job-chart-scroll"
+                  className={`job-chart-scroll${(chartTooltip.point || chartTooltipPinned?.point) ? ' job-chart-scroll-clickable' : ''}`}
+                  onMouseDown={handleChartMouseDown}
                   onMouseMove={handleChartMouseMove}
+                  onMouseUp={handleChartMouseUp}
                   onMouseLeave={handleChartMouseLeave}
+                  onClick={handleChartClick}
                 >
                   <div
                     className="job-chart-inner"
                     style={{ width: chartInnerWidth ?? '100%', minWidth: '100%' }}
                   >
-                    <ResponsiveContainer width={chartInnerWidth ?? '100%'} height={200}>
+                    <ResponsiveContainer width={chartInnerWidth ?? '100%'} height={280}>
                       <ScatterChart
                         data={scatterData}
                         margin={{ top: 4, right: CHART_MARGIN_RIGHT, left: 0, bottom: 4 }}
                         key={chartRange}
+                        isAnimationActive={false}
                       >
                         {dayBands.map((band, i) => (
-                          <ReferenceArea key={`day-${i}`} x1={band.x1} x2={band.x2} fill={band.fill} />
+                          <ReferenceArea key={`day-${i}`} x1={band.x1} x2={band.x2} fill={band.fill} isAnimationActive={false} />
                         ))}
                         <CartesianGrid strokeDasharray="2 2" stroke="var(--border)" />
                         <XAxis
@@ -616,28 +728,31 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
                         <YAxis
                           type="number"
                           dataKey="duration"
+                          domain={chartYDomain}
                           stroke="var(--text-muted)"
                           tick={{ fontSize: 9 }}
                           width={28}
                         />
                         <Tooltip content={() => null} cursor={false} />
-                        <Scatter dataKey="duration" fill="var(--accent)" shape={ScatterDot} />
-                        {chartTooltip.point && (
+                        <Scatter dataKey="duration" fill="var(--accent)" shape={ScatterDot} isAnimationActive={false} />
+                        {(chartTooltip.point || chartTooltipPinned?.point) && (
                           <ReferenceDot
-                            x={chartTooltip.point.ts}
-                            y={chartTooltip.point.duration}
+                            x={(chartTooltipPinned?.point ?? chartTooltip.point).ts}
+                            y={(chartTooltipPinned?.point ?? chartTooltip.point).duration}
                             r={6}
                             fill="transparent"
                             stroke="var(--accent)"
                             strokeWidth={2}
+                            isAnimationActive={false}
                           />
                         )}
                         {showAverageLine && averageDuration != null && (
                           <ReferenceLine
                             y={averageDuration}
-                            stroke="var(--warning)"
+                            stroke="var(--chart-average-line)"
                             strokeDasharray="4 4"
                             strokeWidth={1.5}
+                            isAnimationActive={false}
                           />
                         )}
                         {displayMinPoints.map((pt, i) => (
@@ -649,6 +764,7 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
                             fill="var(--success)"
                             stroke="var(--surface)"
                             strokeWidth={2}
+                            isAnimationActive={false}
                           />
                         ))}
                         {displayMaxPoints.map((pt, i) => (
@@ -660,6 +776,7 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
                             fill="var(--warning)"
                             stroke="var(--surface)"
                             strokeWidth={2}
+                            isAnimationActive={false}
                           />
                         ))}
                       </ScatterChart>
@@ -668,29 +785,88 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
                 </div>
                 {chartTooltip.point && (
                   <div
+                    className="job-chart-hover-tooltip"
+                    style={{
+                      position: 'fixed',
+                      left: chartTooltip.x + 14,
+                      top: chartTooltip.y,
+                      transform: 'translateY(-50%)',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    {new Date(chartTooltip.point.ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                    <span className="job-chart-hover-tooltip-sep"> · </span>
+                    {chartTooltip.point.duration} min
+                  </div>
+                )}
+                {chartTooltipPinned?.point && (
+                  <div
                     className="job-chart-custom-tooltip"
                     style={{
                       position: 'fixed',
-                      left: chartTooltip.x,
-                      top: chartTooltip.y,
+                      left: chartTooltipPinned.x,
+                      top: chartTooltipPinned.y,
                       transform: 'translate(-100%, -50%)',
                       pointerEvents: 'none',
                     }}
                   >
                     <div className="job-chart-custom-tooltip-label">
-                      {formatXTick(chartTooltip.point.ts)}
+                      {formatXTick(chartTooltipPinned.point.ts)}
                     </div>
                     <div className="job-chart-custom-tooltip-value">
-                      {chartTooltip.point.duration} min
+                      {chartTooltipPinned.point.duration} min
                     </div>
+                    <div className="job-chart-custom-tooltip-hint">Click for details</div>
                   </div>
                 )}
               </div>
+              {chartPopupSnapshot && (
+                <div
+                  className="modal-overlay"
+                  onClick={() => { setChartPopupSnapshot(null); setChartTooltipPinned(null) }}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Route details"
+                >
+                  <div
+                    className="modal-content card"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="job-chart-snapshot-popup-head">
+                      <h3 className="job-chart-snapshot-popup-title">
+                        {formatTime(chartPopupSnapshot.collected_at)}
+                      </h3>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => { setChartPopupSnapshot(null); setChartTooltipPinned(null) }}
+                        aria-label="Close"
+                      >
+                        Close
+                      </button>
+                    </div>
+                    <SnapshotDetail snapshot={chartPopupSnapshot} />
+                  </div>
+                </div>
+              )}
               {(minDurationInRange != null || maxDurationInRange != null || averageDuration != null || displayMinPoints.length > 0 || displayMaxPoints.length > 0) && (
                 <div className="job-chart-side-labels">
+                  {averageDuration != null && (
+                    <div className="job-chart-side-item job-chart-side-avg">
+                      <span className="job-chart-side-label">Avg (all)</span>
+                      <span className="job-chart-side-value">{averageDuration.toFixed(1)} min</span>
+                    </div>
+                  )}
                   {minMaxMode !== 'off' && displayMinPoints.length > 0 && (
                     <div className="job-chart-side-item job-chart-side-low">
                       <span className="job-chart-side-label">{minMaxMode === 'perDay' ? 'Low (per day)' : 'Low'}</span>
+                      <span className="job-chart-side-value">
+                        {minMaxMode === 'perDay' && displayMinPoints.length > 0
+                          ? `${formatDurationMin(Math.min(...displayMinPoints.map((p) => p.duration)))} min`
+                          : minDurationInRange != null
+                            ? `${formatDurationMin(minDurationInRange)} min`
+                            : ''}
+                      </span>
                       <span className="job-chart-side-time">
                         {displayMinPoints.length === 1
                           ? formatXTick(displayMinPoints[0].ts)
@@ -698,18 +874,28 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
                             ? `${displayMinPoints.length} points`
                             : `${displayMinPoints.length} times`}
                       </span>
-                      <span className="job-chart-side-value">
-                        {minMaxMode === 'perDay' && displayMinPoints.length > 0
-                          ? `${Math.min(...displayMinPoints.map((p) => p.duration)).toFixed(1)} min`
-                          : minDurationInRange != null
-                            ? `${minDurationInRange.toFixed(1)} min`
-                            : ''}
-                      </span>
+                      <button
+                        type="button"
+                        className="job-chart-side-detail-btn"
+                        onClick={() => {
+                          const snap = getSnapshotForPoint(displayMinPoints[0])
+                          if (snap) setChartPopupSnapshot(snap)
+                        }}
+                      >
+                        Route detail
+                      </button>
                     </div>
                   )}
                   {minMaxMode !== 'off' && displayMaxPoints.length > 0 && (
                     <div className="job-chart-side-item job-chart-side-high">
                       <span className="job-chart-side-label">{minMaxMode === 'perDay' ? 'High (per day)' : 'High'}</span>
+                      <span className="job-chart-side-value">
+                        {minMaxMode === 'perDay' && displayMaxPoints.length > 0
+                          ? `${formatDurationMin(Math.max(...displayMaxPoints.map((p) => p.duration)))} min`
+                          : maxDurationInRange != null
+                            ? `${formatDurationMin(maxDurationInRange)} min`
+                            : ''}
+                      </span>
                       <span className="job-chart-side-time">
                         {displayMaxPoints.length === 1
                           ? formatXTick(displayMaxPoints[0].ts)
@@ -717,19 +903,16 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
                             ? `${displayMaxPoints.length} points`
                             : `${displayMaxPoints.length} times`}
                       </span>
-                      <span className="job-chart-side-value">
-                        {minMaxMode === 'perDay' && displayMaxPoints.length > 0
-                          ? `${Math.max(...displayMaxPoints.map((p) => p.duration)).toFixed(1)} min`
-                          : maxDurationInRange != null
-                            ? `${maxDurationInRange.toFixed(1)} min`
-                            : ''}
-                      </span>
-                    </div>
-                  )}
-                  {averageDuration != null && (
-                    <div className="job-chart-side-item job-chart-side-avg">
-                      <span className="job-chart-side-label">Avg (all)</span>
-                      <span className="job-chart-side-value">{averageDuration.toFixed(1)} min</span>
+                      <button
+                        type="button"
+                        className="job-chart-side-detail-btn"
+                        onClick={() => {
+                          const snap = getSnapshotForPoint(displayMaxPoints[0])
+                          if (snap) setChartPopupSnapshot(snap)
+                        }}
+                      >
+                        Route detail
+                      </button>
                     </div>
                   )}
                 </div>
@@ -759,7 +942,7 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
                 </tr>
               </thead>
               <tbody>
-                {(showAllSnapshots ? primarySnapshots.slice() : primarySnapshots.slice(-40)).reverse().map(s => {
+                {(showAllSnapshots ? primarySnapshots.slice() : primarySnapshots.slice(-5)).reverse().map(s => {
                   const isMin = s.id === minSnapshotId
                   const isMax = s.id === maxSnapshotId
                   return (
@@ -789,14 +972,14 @@ export default function JobDetail({ jobId, onBack, onFlipRoute, onDeleted }) {
                 })}
               </tbody>
             </table>
-            {primarySnapshots.length > 40 && (
+            {primarySnapshots.length > 5 && (
               <div className="job-table-footer">
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
                   onClick={() => setShowAllSnapshots(prev => !prev)}
                 >
-                  {showAllSnapshots ? 'Show last 40' : `Show all (${primarySnapshots.length})`}
+                  {showAllSnapshots ? 'Show last 5' : `Expand to see all (${primarySnapshots.length})`}
                 </button>
               </div>
             )}

@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import session from 'express-session';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import { fileURLToPath } from 'url';
@@ -15,8 +16,23 @@ if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 
 initDatabase();
 const app = express();
-app.use(cors());
+const authPassword = process.env.AUTH_PASSWORD || '';
+const authEnabled = authPassword.length > 0;
+
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
+app.use(session({
+  secret: process.env.AUTH_SECRET || process.env.AUTH_PASSWORD || 'routewatch-session-secret',
+  resave: false,
+  saveUninitialized: false,
+  name: 'routewatch.sid',
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  },
+}));
 
 // Log and normalize 500 errors
 function handleError(res, e, context = '') {
@@ -55,6 +71,35 @@ function toJobResponse(row) {
     end_name: strOrNull(endNameVal),
   };
 }
+
+// ----- Auth (optional: set AUTH_PASSWORD in .env to require login) -----
+app.get('/api/auth/me', (req, res) => {
+  if (!authEnabled) return res.json({ ok: true, authEnabled: false });
+  if (req.session?.authenticated) return res.json({ ok: true, authEnabled: true });
+  res.status(401).json({ error: 'Not authenticated', authEnabled: true });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!authEnabled) return res.json({ ok: true, authEnabled: false });
+  if (password !== authPassword) return res.status(401).json({ error: 'Invalid password' });
+  req.session.authenticated = true;
+  res.json({ ok: true, authEnabled: true });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  req.session.destroy(() => {});
+  res.json({ ok: true });
+});
+
+function requireAuth(req, res, next) {
+  if (!req.path.startsWith('/api')) return next();
+  if (req.path.startsWith('/api/auth')) return next();
+  if (!authEnabled) return next();
+  if (req.session?.authenticated) return next();
+  res.status(401).json({ error: 'Not authenticated', authEnabled: true });
+}
+app.use(requireAuth);
 
 // API: List jobs
 app.get('/api/jobs', (req, res) => {

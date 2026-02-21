@@ -22,7 +22,7 @@ export function getCurrentLocation() {
 export async function getCurrentLocationAddress() {
   const { lat, lng } = await getCurrentLocation()
   const params = new URLSearchParams({ lat: String(lat), lng: String(lng) })
-  const res = await fetch(`${API}/reverse-geocode?${params}`)
+  const res = await fetch(`${API}/reverse-geocode?${params}`, { credentials: 'include' })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
     throw new Error(data?.error || `Request failed: ${res.status}`)

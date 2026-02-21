@@ -18,6 +18,28 @@ function FitBounds({ points }) {
   return null
 }
 
+function RecenterButton({ points }) {
+  const map = useMap()
+  if (!points?.length) return null
+  const handleClick = () => {
+    const bounds = L.latLngBounds(points.map(([lat, lng]) => [lat, lng]))
+    map.fitBounds(bounds, { padding: [30, 30] })
+  }
+  return (
+    <div className="route-map-recenter">
+      <button
+        type="button"
+        className="route-map-recenter-btn"
+        onClick={handleClick}
+        aria-label="Recenter map on route"
+        title="Recenter map"
+      >
+        ⌂
+      </button>
+    </div>
+  )
+}
+
 const OSM_TILES = {
   url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
@@ -109,6 +131,7 @@ export default function RouteMap({ origin, destination, travelMode = 'driving', 
           opacity={0.8}
         />
         <FitBounds points={points} />
+        <RecenterButton points={points} />
       </MapContainer>
     </div>
   )

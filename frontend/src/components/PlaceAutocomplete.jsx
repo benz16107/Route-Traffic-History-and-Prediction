@@ -41,7 +41,7 @@ export default function PlaceAutocomplete({ value, onChange, placeholder, id, re
       try {
         const params = new URLSearchParams({ input: value.trim() })
         if (country) params.set('country', country)
-        const res = await fetch(`${API}/place-autocomplete?${params}`)
+        const res = await fetch(`${API}/place-autocomplete?${params}`, { credentials: 'include' })
         const data = await res.json()
         if (!res.ok) throw new Error(data?.error || 'Autocomplete failed')
         setSuggestions(data.predictions || [])

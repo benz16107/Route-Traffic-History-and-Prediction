@@ -1,7 +1,9 @@
 import { useTheme } from '../context/ThemeContext'
+import { useAuth } from '../context/AuthContext'
 
 export default function Header({ view, onNavigate }) {
   const { theme, setTheme } = useTheme()
+  const { authEnabled, logout } = useAuth()
 
   return (
     <header className="site-header">
@@ -34,6 +36,11 @@ export default function Header({ view, onNavigate }) {
           </button>
         </nav>
         <div className="header-actions">
+          {authEnabled && (
+            <button type="button" className="header-link header-link-logout" onClick={logout}>
+              Sign out
+            </button>
+          )}
           <div className="theme-toggle" role="group" aria-label="Theme">
             <button
               type="button"

@@ -6,7 +6,7 @@ const STORAGE_KEY = 'routewatch-theme'
 
 export function ThemeProvider({ children }) {
   const [theme, setThemeState] = useState(() => {
-    return localStorage.getItem(STORAGE_KEY) || 'light'
+    return localStorage.getItem(STORAGE_KEY) || 'dark'
   })
 
   useEffect(() => {
