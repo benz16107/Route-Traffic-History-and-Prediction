@@ -19,9 +19,9 @@ if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
 initDatabase();
 const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
-const authPassword = process.env.AUTH_PASSWORD || '';
-const googleClientId = process.env.GOOGLE_OAUTH_CLIENT_ID || '';
-const googleClientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET || '';
+const authPassword = (process.env.AUTH_PASSWORD || '').trim();
+const googleClientId = (process.env.GOOGLE_OAUTH_CLIENT_ID || '').trim();
+const googleClientSecret = (process.env.GOOGLE_OAUTH_CLIENT_SECRET || '').trim();
 const authEnabled = authPassword.length > 0 || googleClientId.length > 0;
 
 const sessionSecret = process.env.AUTH_SECRET || process.env.AUTH_PASSWORD || 'routewatch-session-secret';
@@ -65,6 +65,8 @@ app.use(cookieSession({
   sameSite: cookieSameSite,
 }));
 
+// Startup log: confirm whether auth env vars are visible (check deploy logs if login page says "no sign-in method")
+console.log('[Auth] passwordAuth:', authPassword.length > 0 ? 'yes' : 'no', '| googleAuth:', googleClientId.length > 0 ? 'yes' : 'no');
 if (isProduction && googleClientId.length > 0) {
   if (!process.env.BACKEND_URL) console.warn('[Google OAuth] Set BACKEND_URL to your public backend URL so the OAuth redirect URI matches Google Console.');
   if (!process.env.FRONTEND_URL) console.warn('[Google OAuth] If frontend and backend are on different hosts, set FRONTEND_URL so the session cookie works after login. See DEPLOYMENT-GOOGLE-LOGIN.md');

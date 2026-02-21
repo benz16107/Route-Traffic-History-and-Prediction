@@ -69,7 +69,7 @@ export default function LoginPage() {
           </>
         )}
         {!showPassword && !showGoogle && (
-          <p className="auth-error">No sign-in method configured. Set AUTH_PASSWORD or Google OAuth in .env.</p>
+          <p className="auth-error">No sign-in method configured on the server. Set AUTH_PASSWORD or Google OAuth (GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET) in your deployment environment variables.</p>
         )}
       </div>
     </div>
